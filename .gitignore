@@ -12,6 +12,7 @@ BundleTrack/build
 foundationpose/
 build/
 develop-eggs/
+ref_views/*
 *.zip
 demo_data/*
 dist/
