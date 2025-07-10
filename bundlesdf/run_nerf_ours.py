@@ -71,9 +71,7 @@ class LFDataset:
         ]
         poses = [np.loadtxt(pose_path) for pose_path in pose_paths]
         for i, pose in enumerate(poses):
-            trans = pose[:3, 3]
-            rot = R.from_matrix(pose[:3, :3]).as_rotvec()
-            poses[i] = np.concatenate((trans, rot))
+            poses[i] = pose
         poses = np.stack(poses, axis=0).reshape(
             self.metadata["n_views"][0], self.metadata["n_views"][1], *poses[0].shape
         )
@@ -91,6 +89,7 @@ class LFDataset:
                 self.metadata["n_views"][1],
                 *depths[0].shape,
             )
+            result += (depths,)
         if os.path.exists(f"{frame_path}/masks/") and self.return_segment:
             mask_paths = [
                 f"{frame_path}/masks/{item}"
@@ -105,9 +104,43 @@ class LFDataset:
             )
             masks = masks.astype(np.float32)
             masks /= masks.max()
-            LF *= masks[..., None]
-            depths *= masks
-        result += (depths,)
+            result += (masks,)
+        object_to_base = np.loadtxt(f"{frame_path}/obj_pose.txt")
+        result += (object_to_base,)
+        return result
+
+    def load_all(self):
+        glcam_in_cvcam = np.array(
+            [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]]
+        ).astype(float)
+        rgbs = []
+        depths = []
+        cam_in_objs = []
+        masks = []
+        K = self.camera_matrix
+        for i in range(self.size):
+            (
+                LF,
+                _,
+                _,
+                LF_poses,
+                LF_depths,
+                LF_masks,
+                object_to_base,
+            ) = self[i]
+            for s in range(LF.shape[0]):
+                for t in range(LF.shape[1]):
+                    rgbs.append(LF[s, t])
+                    cam_to_base = LF_poses[s, t]
+                    cam_to_object = np.linalg.inv(object_to_base) @ cam_to_base
+                    cam_to_object_gl = cam_to_object @ glcam_in_cvcam
+                    cam_in_objs.append(cam_to_object_gl)
+                    if self.return_depth:
+                        depths.append(LF_depths[s, t])
+                    if self.return_segment:
+                        masks.append(LF_masks[s, t])
+        result = rgbs, depths, masks, cam_in_objs, K
+        print(len(rgbs), len(depths), len(masks), len(cam_in_objs), K.shape)
         return result
 
 
@@ -117,5 +150,4 @@ if __name__ == "__main__":
         return_depth=True,
         return_segment=True,
     )
-    LF, H_pix_to_rays, H_rays_to_pix, poses, depths = dataset[0]
-    print(LF.shape, H_pix_to_rays.shape, H_rays_to_pix.shape, poses.shape, depths.shape)
+    data = dataset.load_all()
