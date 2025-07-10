@@ -3,6 +3,13 @@ import numpy as np
 import json
 from PIL import Image
 from scipy.spatial.transform import Rotation as R
+from nerf_runner import *
+
+code_dir = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(f"{code_dir}/../")
+from datareader import *
+from bundlesdf.tool import *
+import yaml, argparse
 
 
 class LFDataset:
@@ -16,36 +23,7 @@ class LFDataset:
         self.size = len(self.frames)
         with open(f"{self.folder}/metadata.json", "r") as f:
             self.metadata = json.load(f)
-        self.H_pix_to_rays, self.H_rays_to_pix = self.get_H()
         self.return_depth = return_depth
-
-    def get_H(self):
-        s_spacing = self.metadata["x_spacing"]
-        t_spacing = self.metadata["y_spacing"]
-        s_size = self.metadata["n_views"][0]
-        t_size = self.metadata["n_views"][1]
-
-        cam_to_image = self.camera_matrix
-        image_to_cam = np.linalg.inv(cam_to_image)
-        pixels_to_rays_rel = np.eye(5)
-        pixels_to_rays_rel[2:, 2:] = image_to_cam
-        pixels_to_rays_rel[2, 2] = image_to_cam[1, 1]
-        pixels_to_rays_rel[3, 3] = image_to_cam[0, 0]
-        pixels_to_rays_rel[2, -1] = image_to_cam[1, -1]
-        pixels_to_rays_rel[3, -1] = image_to_cam[0, -1]
-        pixels_to_rays_rel[:2, :2] = np.array([s_spacing, t_spacing]) * np.eye(2)
-        pixels_to_rays_rel[0, -1] = -(s_size // 2) * s_spacing
-        pixels_to_rays_rel[1, -1] = -(t_size // 2) * t_spacing
-
-        pixels_to_rays_abs = np.copy(pixels_to_rays_rel)
-        pixels_to_rays_abs[2, 0] = s_spacing
-        pixels_to_rays_abs[3, 1] = t_spacing
-        pixels_to_rays_abs[2, -1] -= pixels_to_rays_rel[0, -1]
-        pixels_to_rays_abs[3, -1] -= pixels_to_rays_rel[1, -1]
-
-        H_pix_to_rays = np.array(pixels_to_rays_abs)
-        H_rays_to_pix = np.linalg.inv(H_pix_to_rays)
-        return H_pix_to_rays, H_rays_to_pix
 
     def __len__(self):
         return self.size
@@ -75,7 +53,7 @@ class LFDataset:
         poses = np.stack(poses, axis=0).reshape(
             self.metadata["n_views"][0], self.metadata["n_views"][1], *poses[0].shape
         )
-        result = (LF, self.H_pix_to_rays, self.H_rays_to_pix, poses)
+        result = (LF, poses)
 
         if os.path.exists(f"{frame_path}/depth/") and self.return_depth:
             depth_paths = [
@@ -121,8 +99,6 @@ class LFDataset:
         for i in range(self.size):
             (
                 LF,
-                _,
-                _,
                 LF_poses,
                 LF_depths,
                 LF_masks,
@@ -153,4 +129,4 @@ if __name__ == "__main__":
         return_depth=True,
         return_segment=True,
     )
-    data = dataset.load_all()
+    rgbs, depths, masks, cam_in_objs, K = dataset.load_all()
