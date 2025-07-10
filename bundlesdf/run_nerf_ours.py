@@ -123,10 +123,99 @@ class LFDataset:
         return result
 
 
+def run_neural_object_field(
+    cfg,
+    K,
+    rgbs,
+    depths,
+    masks,
+    cam_in_obs,
+    save_dir,
+):
+    rgbs = np.asarray(rgbs)
+    depths = np.asarray(depths)
+    masks = np.asarray(masks)
+    glcam_in_obs = np.asarray(cam_in_obs)
+
+    cfg["save_dir"] = save_dir
+    os.makedirs(save_dir, exist_ok=True)
+
+    for i, rgb in enumerate(rgbs):
+        imageio.imwrite(f"{save_dir}/rgb_{i:07d}.png", rgb)
+
+    sc_factor, translation, pcd_real_scale, pcd_normalized = compute_scene_bounds(
+        None,
+        glcam_in_obs,
+        K,
+        use_mask=True,
+        base_dir=save_dir,
+        rgbs=rgbs,
+        depths=depths,
+        masks=masks,
+        eps=cfg["dbscan_eps"],
+        min_samples=cfg["dbscan_eps_min_samples"],
+    )
+    cfg["sc_factor"] = sc_factor
+    cfg["translation"] = translation
+
+    o3d.io.write_point_cloud(f"{save_dir}/pcd_normalized.ply", pcd_normalized)
+
+    rgbs_, depths_, masks_, normal_maps, poses = preprocess_data(
+        rgbs,
+        depths,
+        masks,
+        normal_maps=None,
+        poses=glcam_in_obs,
+        sc_factor=cfg["sc_factor"],
+        translation=cfg["translation"],
+    )
+
+    nerf = NerfRunner(
+        cfg,
+        rgbs_,
+        depths_,
+        masks_,
+        normal_maps=None,
+        poses=poses,
+        K=K,
+        occ_masks=None,
+        build_octree_pcd=pcd_normalized,
+    )
+    nerf.train()
+
+    mesh = nerf.extract_mesh(isolevel=0, voxel_size=cfg["mesh_resolution"])
+    mesh = nerf.mesh_texture_from_train_images(mesh, rgbs_raw=rgbs, tex_res=1028)
+    optimized_cvcam_in_obs, offset = get_optimized_poses_in_real_world(
+        poses, nerf.models["pose_array"], cfg["sc_factor"], cfg["translation"]
+    )
+    mesh = mesh_to_real_world(
+        mesh,
+        pose_offset=offset,
+        translation=nerf.cfg["translation"],
+        sc_factor=nerf.cfg["sc_factor"],
+    )
+    return mesh
+
+
 if __name__ == "__main__":
+    with open("bundlesdf/config_ycbv.yml", "r") as ff:
+        cfg = yaml.safe_load(ff)
+    dataset_dir = "bundlesdf/data_ours/dynamic_dataset_orb_farther"
     dataset = LFDataset(
-        folder="bundlesdf/data_ours/dynamic_dataset_orb_farther",
+        folder=dataset_dir,
         return_depth=True,
         return_segment=True,
     )
     rgbs, depths, masks, cam_in_objs, K = dataset.load_all()
+    mesh = run_neural_object_field(
+        cfg,
+        K,
+        rgbs,
+        depths,
+        masks,
+        cam_in_objs,
+        save_dir=dataset_dir + "/mesh",
+    )
+    out_file = f"{dataset_dir}/model.obj"
+    os.makedirs(os.path.dirname(out_file), exist_ok=True)
+    mesh.export(out_file)
