@@ -130,7 +130,7 @@ class LFDataset:
             ) = self[i]
             for s in range(LF.shape[0]):
                 for t in range(LF.shape[1]):
-                    rgbs.append(LF[s, t])
+                    rgbs.append((LF[s, t] * 255).astype(np.uint8))
                     cam_to_base = LF_poses[s, t]
                     cam_to_object = np.linalg.inv(object_to_base) @ cam_to_base
                     cam_to_object_gl = cam_to_object @ glcam_in_cvcam
@@ -139,14 +139,17 @@ class LFDataset:
                         depths.append(LF_depths[s, t])
                     if self.return_segment:
                         masks.append(LF_masks[s, t])
+        rgbs = np.stack(rgbs, axis=0)
+        depths = np.stack(depths, axis=0).astype(np.float32)
+        masks = np.stack(masks, axis=0).astype(np.uint8) * 255
+        cam_in_objs = np.stack(cam_in_objs, axis=0).astype(np.float32)
         result = rgbs, depths, masks, cam_in_objs, K
-        print(len(rgbs), len(depths), len(masks), len(cam_in_objs), K.shape)
         return result
 
 
 if __name__ == "__main__":
     dataset = LFDataset(
-        folder="data_ours/dynamic_dataset_orb_farther",
+        folder="bundlesdf/data_ours/dynamic_dataset_orb_farther",
         return_depth=True,
         return_segment=True,
     )
