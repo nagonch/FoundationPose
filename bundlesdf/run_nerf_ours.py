@@ -13,16 +13,19 @@ import yaml, argparse
 
 
 class LFDataset:
-    def __init__(self, folder, return_depth=False, return_segment=False):
+    def __init__(self, folder, is_ref=False, return_depth=False, return_segment=False):
         self.folder = folder
+        self.is_ref = is_ref
         self.return_segment = return_segment
         self.camera_matrix = np.array(np.loadtxt(f"{self.folder}/camera_matrix.txt"))
+        with open(f"{self.folder}/metadata.json", "r") as f:
+            self.metadata = json.load(f)
+        if self.is_ref:
+            self.folder = f"{self.folder}/ref_views"
         self.frames = list(
             sorted([item for item in sorted(os.listdir(self.folder)) if "LF_" in item])
         )
         self.size = len(self.frames)
-        with open(f"{self.folder}/metadata.json", "r") as f:
-            self.metadata = json.load(f)
         self.return_depth = return_depth
 
     def __len__(self):
@@ -67,6 +70,8 @@ class LFDataset:
                 self.metadata["n_views"][1],
                 *depths[0].shape,
             )
+            if depths.dtype == np.uint16:
+                depths = depths.astype(np.float32) / 1000.0
             result += (depths,)
         if os.path.exists(f"{frame_path}/masks/") and self.return_segment:
             mask_paths = [
@@ -83,7 +88,10 @@ class LFDataset:
             masks = masks.astype(np.float32)
             masks /= masks.max()
             result += (masks,)
-        object_to_base = np.loadtxt(f"{frame_path}/obj_pose.txt")
+        if self.is_ref:
+            object_to_base = np.loadtxt(f"{self.folder}/obj_pose.txt")
+        else:
+            object_to_base = np.loadtxt(f"{frame_path}/obj_pose.txt")
         result += (object_to_base,)
         return result
 
@@ -200,11 +208,12 @@ def run_neural_object_field(
 if __name__ == "__main__":
     with open("bundlesdf/config_ycbv.yml", "r") as ff:
         cfg = yaml.safe_load(ff)
-    dataset_dir = "bundlesdf/data_ours/dynamic_dataset_orb_farther"
+    dataset_dir = "/home/ngoncharov/LFPose/data/parrot_rs"
     dataset = LFDataset(
         folder=dataset_dir,
         return_depth=True,
         return_segment=True,
+        is_ref=True,
     )
     rgbs, depths, masks, cam_in_objs, K = dataset.load_all()
     mesh = run_neural_object_field(
