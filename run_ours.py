@@ -2,6 +2,8 @@ from Utils import *
 import json, uuid, joblib, os, sys, argparse
 from datareader import *
 from estimater import *
+import numpy as np
+from PIL import Image
 
 code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f"{code_dir}/mycpp/build")
@@ -33,11 +35,36 @@ def get_model():
 
 class LFDataset:
     def __init__(self, folder):
+        self.folder = folder
         self.mesh = trimesh.load(f"{folder}/model.obj")
+        self.frames = list(
+            sorted([item for item in sorted(os.listdir(self.folder)) if "LF_" in item])
+        )
+        self.size = len(self.frames)
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, idx):
+        frame_path = f"{self.folder}/{self.frames[idx]}"
+        img_paths = [
+            f"{frame_path}/imgs/{item}"
+            for item in sorted(os.listdir(f"{frame_path}/imgs/"))
+            if item.endswith(".png")
+        ]
+        center_image_path = img_paths[len(img_paths) // 2]
+        image_center = Image.open(center_image_path)
+        gt_pose = np.loadtxt(f"{frame_path}/obj_pose.txt")
+
+        return image_center, gt_pose
 
 
 if __name__ == "__main__":
     dataset_path = "/home/ngoncharov/LFPose/data/parrot"
     dataset = LFDataset(dataset_path)
     print(dataset.mesh)
+    print(len(dataset))
+    img, gt_pose = dataset[0]
+    print(img.size)
+    print(gt_pose)
     # model = get_model()
