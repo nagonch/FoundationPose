@@ -31,6 +31,13 @@ def get_model():
     return est
 
 
+class LFDataset:
+    def __init__(self, folder):
+        self.mesh = trimesh.load(f"{folder}/model.obj")
+
+
 if __name__ == "__main__":
-    dataset_path = "data/parrot_dynamic"
-    model = get_model()
+    dataset_path = "/home/ngoncharov/LFPose/data/parrot"
+    dataset = LFDataset(dataset_path)
+    print(dataset.mesh)
+    # model = get_model()
