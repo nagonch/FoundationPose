@@ -10,7 +10,7 @@ sys.path.append(f"{code_dir}/mycpp/build")
 import yaml
 
 CODE_DIR = os.path.dirname(os.path.realpath(__file__))
-DEBUG = True
+DEBUG = False
 DEBUG_DIR = f"{CODE_DIR}/debug"
 
 
@@ -44,6 +44,7 @@ class LFDataset:
             sorted([item for item in sorted(os.listdir(self.folder)) if "LF_" in item])
         )
         self.size = len(self.frames)
+        self.camera_matrix = np.array(np.loadtxt(f"{self.folder}/camera_matrix.txt"))
 
     def __len__(self):
         return self.size
@@ -65,27 +66,70 @@ class LFDataset:
             for item in sorted(os.listdir(f"{frame_path}/depth/"))
             if item.endswith(".npy")
         ]
+        cam_pose_paths = [
+            f"{frame_path}/poses/{item}"
+            for item in sorted(os.listdir(f"{frame_path}/poses/"))
+            if item.endswith(".txt")
+        ]
         center_image_path = img_paths[len(img_paths) // 2]
         image_center = np.array(Image.open(center_image_path))
-        depth_center = np.load(depth_paths[len(depth_paths) // 2])
+        depth_center = np.load(depth_paths[len(depth_paths) // 2]) / 1000.0
         mask_center = np.array(Image.open(mask_paths[len(mask_paths) // 2]))
-        gt_pose = np.loadtxt(f"{frame_path}/obj_pose.txt")
+        cam_to_world = np.loadtxt(cam_pose_paths[len(cam_pose_paths) // 2])
 
-        return image_center, depth_center, mask_center, gt_pose
+        object_to_world = np.loadtxt(f"{frame_path}/obj_pose.txt")
+        object_to_cam = np.linalg.inv(cam_to_world) @ object_to_world
+
+        return image_center, depth_center, mask_center, object_to_cam
 
 
-def infer_pose(model, img, depth_img, mask_img, gt_pose, mesh):
-    pass
+def set_object(model, mesh):
+    model.reset_object(
+        model_pts=mesh.vertices.copy(),
+        model_normals=mesh.vertex_normals.copy(),
+        mesh=mesh,
+    )
+    return model
+
+
+def infer_poses(model, dataset):
+    gt_poses = []
+    poses = []
+    for i in range(len(dataset)):
+        img, depth_image, mask_image, gt_pose = dataset[i]
+        depth_image = np.ma.masked_equal(depth_image, 0)
+        if i == 0:
+            pose = model.register(
+                K=dataset.camera_matrix,
+                rgb=img,
+                depth=depth_image,
+                ob_mask=mask_image,
+                ob_id=0,
+                iteration=5,
+            )
+        else:
+            pose = model.track_one(
+                rgb=img,
+                depth=depth_image,
+                K=dataset.camera_matrix,
+                iteration=5,
+            )
+        print(pose[2, 3])
+        print(depth_image[mask_image].mean())
+        gt_poses.append(gt_pose)
+        poses.append(pose)
+    return gt_poses, poses
 
 
 if __name__ == "__main__":
     dataset_path = "/home/ngoncharov/LFPose/data/parrot_rs2"
     dataset = LFDataset(dataset_path)
-    print(dataset.mesh)
-    print(len(dataset))
-    img, depth_image, mask_image, gt_pose = dataset[0]
-    print(img.shape)
-    print(depth_image.shape)
-    print(mask_image.shape)
-    print(gt_pose)
-    # model = get_model()
+    model = get_model()
+    model = set_object(model, dataset.mesh)
+    gt_poses, poses = infer_poses(model, dataset)
+    for i in range(len(gt_poses)):
+        print(f"Frame {i}:")
+        print("Ground Truth Pose:")
+        print(gt_poses[i])
+        print("Estimated Pose:")
+        print(poses[i])
