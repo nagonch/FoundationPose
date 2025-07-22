@@ -39,7 +39,7 @@ RUN conda init bash && \
     conda activate my && \
     pip install torch==2.0.0+cu118 torchvision==0.15.1+cu118 torchaudio==2.0.1 --index-url https://download.pytorch.org/whl/cu118 && \
     pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable" && \
-    pip install scipy joblib scikit-learn ruamel.yaml trimesh pyyaml opencv-python imageio open3d transformations warp-lang einops kornia pyrender
+    pip install scipy joblib scikit-learn ruamel.yaml trimesh pyyaml opencv-python imageio open3d transformations warp-lang einops kornia pyrender viser
 
 # Kaolin install
 RUN cd / && git clone --recursive https://github.com/NVIDIAGameWorks/kaolin

@@ -114,8 +114,6 @@ def infer_poses(model, dataset):
                 K=dataset.camera_matrix,
                 iteration=5,
             )
-        print(pose[2, 3])
-        print(depth_image[mask_image].mean())
         gt_poses.append(gt_pose)
         poses.append(pose)
     return gt_poses, poses
