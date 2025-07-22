@@ -14,7 +14,7 @@ DEBUG = True
 DEBUG_DIR = f"{CODE_DIR}/debug"
 
 
-def get_model():
+def get_model(device: int = 0):
     glctx = dr.RasterizeCudaContext()
     mesh_tmp = trimesh.primitives.Box(
         extents=np.ones((3)), transform=np.eye(4)
@@ -30,6 +30,9 @@ def get_model():
         debug_dir=DEBUG_DIR,
         debug=DEBUG,
     )
+    torch.cuda.set_device(device)
+    est.to_device(f"cuda:{device}")
+    est.glctx = dr.RasterizeCudaContext(device)
     return est
 
 
@@ -52,11 +55,21 @@ class LFDataset:
             for item in sorted(os.listdir(f"{frame_path}/imgs/"))
             if item.endswith(".png")
         ]
+        depth_paths = [
+            f"{frame_path}/depth/{item}"
+            for item in sorted(os.listdir(f"{frame_path}/depth/"))
+            if item.endswith(".npy")
+        ]
         center_image_path = img_paths[len(img_paths) // 2]
         image_center = Image.open(center_image_path)
+        depth_center = np.load(depth_paths[len(depth_paths) // 2])
         gt_pose = np.loadtxt(f"{frame_path}/obj_pose.txt")
 
-        return image_center, gt_pose
+        return image_center, depth_center, gt_pose
+
+
+def infer_pose(model, img, depth_img, gt_pose, mesh):
+    pass
 
 
 if __name__ == "__main__":
@@ -64,7 +77,8 @@ if __name__ == "__main__":
     dataset = LFDataset(dataset_path)
     print(dataset.mesh)
     print(len(dataset))
-    img, gt_pose = dataset[0]
+    img, depth_image, gt_pose = dataset[0]
     print(img.size)
+    print(depth_image.shape)
     print(gt_pose)
     # model = get_model()
