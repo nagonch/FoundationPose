@@ -55,30 +55,37 @@ class LFDataset:
             for item in sorted(os.listdir(f"{frame_path}/imgs/"))
             if item.endswith(".png")
         ]
+        mask_paths = [
+            f"{frame_path}/masks/{item}"
+            for item in sorted(os.listdir(f"{frame_path}/masks/"))
+            if item.endswith(".png")
+        ]
         depth_paths = [
             f"{frame_path}/depth/{item}"
             for item in sorted(os.listdir(f"{frame_path}/depth/"))
             if item.endswith(".npy")
         ]
         center_image_path = img_paths[len(img_paths) // 2]
-        image_center = Image.open(center_image_path)
+        image_center = np.array(Image.open(center_image_path))
         depth_center = np.load(depth_paths[len(depth_paths) // 2])
+        mask_center = np.array(Image.open(mask_paths[len(mask_paths) // 2]))
         gt_pose = np.loadtxt(f"{frame_path}/obj_pose.txt")
 
-        return image_center, depth_center, gt_pose
+        return image_center, depth_center, mask_center, gt_pose
 
 
-def infer_pose(model, img, depth_img, gt_pose, mesh):
+def infer_pose(model, img, depth_img, mask_img, gt_pose, mesh):
     pass
 
 
 if __name__ == "__main__":
-    dataset_path = "/home/ngoncharov/LFPose/data/parrot"
+    dataset_path = "/home/ngoncharov/LFPose/data/parrot_rs2"
     dataset = LFDataset(dataset_path)
     print(dataset.mesh)
     print(len(dataset))
-    img, depth_image, gt_pose = dataset[0]
-    print(img.size)
+    img, depth_image, mask_image, gt_pose = dataset[0]
+    print(img.shape)
     print(depth_image.shape)
+    print(mask_image.shape)
     print(gt_pose)
     # model = get_model()
