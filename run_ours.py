@@ -166,7 +166,7 @@ def infer_poses(model, dataset):
     return gt_poses, poses
 
 
-def vis_results(dataset, estimated_poses, frames_scale=0.05):
+def vis_results(dataset, estimated_poses, frames_scale=0.05, apply_mask=True):
     server = viser.ViserServer()
 
     @server.on_client_connect
@@ -176,7 +176,7 @@ def vis_results(dataset, estimated_poses, frames_scale=0.05):
 
     camera_matrix = dataset.camera_matrix
     for i in range(len(dataset)):
-        image_center, depth_center, _, object_to_cam, cam_to_world = dataset[i]
+        image_center, depth_center, mask, object_to_cam, cam_to_world = dataset[i]
         # 2D vis
         vis = draw_xyz_axis(
             image_center,
@@ -191,6 +191,10 @@ def vis_results(dataset, estimated_poses, frames_scale=0.05):
         imageio.imwrite(f"{DEBUG_DIR}/track_vis/{str(i).zfill(4)}.png", vis)
 
         # 3D vis
+        if apply_mask:
+            mask = mask.astype(bool)
+            image_center = image_center * mask[:, :, None].astype(image_center.dtype)
+            depth_center = depth_center * mask.astype(depth_center.dtype)
         image_center = image_center.astype(np.float32) / 255.0
         object_to_cam_est = estimated_poses[i]
         object_to_world_est = cam_to_world @ object_to_cam_est
@@ -265,4 +269,4 @@ if __name__ == "__main__":
     model = set_object(model, dataset.mesh)
     gt_poses, poses = infer_poses(model, dataset)
     adds_vals, add_vals = get_metrics(dataset, poses)
-    vis_results(dataset, poses)
+    vis_results(dataset, poses, apply_mask=True)
