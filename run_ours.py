@@ -7,6 +7,7 @@ from PIL import Image
 import viser
 import time
 from scipy.spatial.transform import Rotation as R
+from Utils import add_err, adds_err
 
 code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f"{code_dir}/mycpp/build")
@@ -243,10 +244,25 @@ def vis_results(dataset, estimated_poses, frames_scale=0.05):
         pass
 
 
+def get_metrics(dataset, estimated_poses):
+    gt_pc = dataset.mesh.vertices.copy()
+    adds_vals = []
+    add_vals = []
+    for i in range(len(dataset)):
+        _, _, _, object_to_cam, _ = dataset[i]
+        estimated_pose = estimated_poses[i]
+        add_val = add_err(estimated_pose, object_to_cam, gt_pc)
+        adds_val = adds_err(estimated_pose, object_to_cam, gt_pc)
+        add_vals.append(add_val)
+        adds_vals.append(adds_val)
+    return adds_vals, add_vals
+
+
 if __name__ == "__main__":
     dataset_path = "/home/ngoncharov/LFPose/data/parrot_rs2"
     dataset = LFDataset(dataset_path)
     model = get_model()
     model = set_object(model, dataset.mesh)
     gt_poses, poses = infer_poses(model, dataset)
+    adds_vals, add_vals = get_metrics(dataset, poses)
     vis_results(dataset, poses)
