@@ -4,6 +4,9 @@ from datareader import *
 from estimater import *
 import numpy as np
 from PIL import Image
+import viser
+import time
+from scipy.spatial.transform import Rotation as R
 
 code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f"{code_dir}/mycpp/build")
@@ -12,6 +15,49 @@ import yaml
 CODE_DIR = os.path.dirname(os.path.realpath(__file__))
 DEBUG = False
 DEBUG_DIR = f"{CODE_DIR}/debug"
+
+
+def quat_scalar_first(q):
+    return np.array([q[3], q[0], q[1], q[2]])
+
+
+def convert_depth_to_pc(
+    color_img, depth_map, camera_matrix, depth_thresh=0, depth_trunc=200
+):
+    color_img = (color_img * 255.0).astype(np.uint8)
+    depth_img = depth_map.astype(np.float32)
+    color_o3d, depth_o3d = o3d.geometry.Image(color_img), o3d.geometry.Image(depth_img)
+    intrinsics = o3d.camera.PinholeCameraIntrinsic(
+        width=color_img.shape[1],
+        height=color_img.shape[0],
+        fx=camera_matrix[0, 0],
+        fy=camera_matrix[1, 1],
+        cx=camera_matrix[0, -1],
+        cy=camera_matrix[1, -1],
+    )
+    rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
+        color_o3d,
+        depth_o3d,
+        depth_scale=1.0,
+        depth_trunc=depth_trunc,
+        convert_rgb_to_intensity=False,
+    )
+    pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
+        rgbd_image,
+        intrinsics,
+        project_valid_depth_only=False,
+    )
+    points_3D = np.array(pcd.points)
+    points_3D = np.nan_to_num(
+        points_3D,
+    )
+    point_colors = np.array(pcd.colors)
+    points_mask = points_3D[:, 2] > np.nanmin(points_3D[:, 2]) + depth_thresh
+    points_3D = points_3D[points_mask]
+    point_colors = point_colors[points_mask]
+    pcd.points = o3d.utility.Vector3dVector(points_3D)
+    pcd.colors = o3d.utility.Vector3dVector(point_colors)
+    return pcd
 
 
 def get_model(device: int = 0):
@@ -80,7 +126,7 @@ class LFDataset:
         object_to_world = np.loadtxt(f"{frame_path}/obj_pose.txt")
         object_to_cam = np.linalg.inv(cam_to_world) @ object_to_world
 
-        return image_center, depth_center, mask_center, object_to_cam
+        return image_center, depth_center, mask_center, object_to_cam, cam_to_world
 
 
 def set_object(model, mesh):
@@ -96,7 +142,7 @@ def infer_poses(model, dataset):
     gt_poses = []
     poses = []
     for i in range(len(dataset)):
-        img, depth_image, mask_image, gt_pose = dataset[i]
+        img, depth_image, mask_image, gt_pose, _ = dataset[i]
         depth_image = np.ma.masked_equal(depth_image, 0)
         if i == 0:
             pose = model.register(
@@ -119,15 +165,70 @@ def infer_poses(model, dataset):
     return gt_poses, poses
 
 
+def vis_results(dataset, estimated_poses):
+    server = viser.ViserServer()
+
+    @server.on_client_connect
+    def _(client: viser.ClientHandle) -> None:
+        gui_info = client.gui.add_text("Client ID", initial_value=str(client.client_id))
+        gui_info.disabled = True
+
+    camera_matrix = dataset.camera_matrix
+    for i in range(len(dataset)):
+        image_center, depth_center, mask_center, object_to_cam, cam_to_world = dataset[
+            i
+        ]
+        image_center = image_center.astype(np.float32) / 255.0
+        object_to_cam_est = estimated_poses[i]
+        object_to_world_est = cam_to_world @ object_to_cam_est
+        object_to_world_gt = cam_to_world @ object_to_cam
+        pc = convert_depth_to_pc(
+            image_center, depth_center, camera_matrix, depth_thresh=0.1
+        )
+        pc.transform(cam_to_world)
+        server.scene.add_point_cloud(
+            f"my_point_cloud_{i}",
+            np.array(pc.points),
+            np.array(pc.colors),
+            point_size=1e-4,
+        )
+        server.scene.add_camera_frustum(
+            name=f"{i}_cam",
+            aspect=image_center.shape[1] / image_center.shape[0],
+            scale=1e-1,
+            fov=np.arctan2(
+                image_center.shape[1] / 2,
+                dataset.camera_matrix[0, 0],
+            )
+            * 2,
+            line_width=0.5,
+            image=image_center,
+            position=cam_to_world[:3, 3],
+            wxyz=quat_scalar_first(R.from_matrix(cam_to_world[:3, :3]).as_quat()),
+        )
+        server.scene.add_frame(
+            name=f"{i}_obj_est",
+            position=object_to_world_est[:3, 3],
+            wxyz=quat_scalar_first(
+                R.from_matrix(object_to_world_est[:3, :3]).as_quat()
+            ),
+        )
+        server.scene.add_frame(
+            name=f"{i}_obj_gt",
+            position=object_to_world_gt[:3, 3],
+            wxyz=quat_scalar_first(R.from_matrix(object_to_world_gt[:3, :3]).as_quat()),
+        )
+    try:
+        while True:
+            time.sleep(2.0)
+    except KeyboardInterrupt:
+        pass
+
+
 if __name__ == "__main__":
     dataset_path = "/home/ngoncharov/LFPose/data/parrot_rs2"
     dataset = LFDataset(dataset_path)
     model = get_model()
     model = set_object(model, dataset.mesh)
     gt_poses, poses = infer_poses(model, dataset)
-    for i in range(len(gt_poses)):
-        print(f"Frame {i}:")
-        print("Ground Truth Pose:")
-        print(gt_poses[i])
-        print("Estimated Pose:")
-        print(poses[i])
+    vis_results(dataset, poses)
