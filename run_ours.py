@@ -8,6 +8,7 @@ import viser
 import time
 from scipy.spatial.transform import Rotation as R
 from Utils import add_err, adds_err
+from sklearn.metrics import auc
 
 code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f"{code_dir}/mycpp/build")
@@ -248,7 +249,8 @@ def vis_results(dataset, estimated_poses, frames_scale=0.05, apply_mask=True):
         pass
 
 
-def get_metrics(dataset, estimated_poses):
+def get_metrics(dataset, estimated_poses, threshold_max=0.1):
+    thresholds_space = np.linspace(0, threshold_max, 100)
     gt_pc = dataset.mesh.vertices.copy()
     adds_vals = []
     add_vals = []
@@ -259,7 +261,13 @@ def get_metrics(dataset, estimated_poses):
         adds_val = adds_err(estimated_pose, object_to_cam, gt_pc)
         add_vals.append(add_val)
         adds_vals.append(adds_val)
-    return adds_vals, add_vals
+    adds_vals = np.array(adds_vals)
+    add_vals = np.array(add_vals)
+    adds_accuracies = [(adds_vals < t).mean() for t in thresholds_space]
+    add_accuracies = [(add_vals < t).mean() for t in thresholds_space]
+    adds_auc = auc(np.linspace(0, 1, 100), adds_accuracies)
+    add_auc = auc(np.linspace(0, 1, 100), add_accuracies)
+    return adds_vals, add_vals, adds_auc, add_auc
 
 
 if __name__ == "__main__":
@@ -268,5 +276,6 @@ if __name__ == "__main__":
     model = get_model()
     model = set_object(model, dataset.mesh)
     gt_poses, poses = infer_poses(model, dataset)
-    adds_vals, add_vals = get_metrics(dataset, poses)
-    vis_results(dataset, poses, apply_mask=True)
+    adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
+    print(adds_auc, add_auc)
+    vis_results(dataset, poses, apply_mask=False)
