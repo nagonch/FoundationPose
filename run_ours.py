@@ -175,9 +175,21 @@ def vis_results(dataset, estimated_poses, frames_scale=0.05):
 
     camera_matrix = dataset.camera_matrix
     for i in range(len(dataset)):
-        image_center, depth_center, mask_center, object_to_cam, cam_to_world = dataset[
-            i
-        ]
+        image_center, depth_center, _, object_to_cam, cam_to_world = dataset[i]
+        # 2D vis
+        vis = draw_xyz_axis(
+            image_center,
+            ob_in_cam=estimated_poses[i],
+            scale=0.1,
+            K=camera_matrix,
+            thickness=3,
+            transparency=0,
+            is_input_rgb=True,
+        )
+        os.makedirs(f"{DEBUG_DIR}/track_vis", exist_ok=True)
+        imageio.imwrite(f"{DEBUG_DIR}/track_vis/{str(i).zfill(4)}.png", vis)
+
+        # 3D vis
         image_center = image_center.astype(np.float32) / 255.0
         object_to_cam_est = estimated_poses[i]
         object_to_world_est = cam_to_world @ object_to_cam_est
