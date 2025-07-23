@@ -165,7 +165,7 @@ def infer_poses(model, dataset):
     return gt_poses, poses
 
 
-def vis_results(dataset, estimated_poses):
+def vis_results(dataset, estimated_poses, frames_scale=0.05):
     server = viser.ViserServer()
 
     @server.on_client_connect
@@ -212,11 +212,17 @@ def vis_results(dataset, estimated_poses):
             wxyz=quat_scalar_first(
                 R.from_matrix(object_to_world_est[:3, :3]).as_quat()
             ),
+            axes_length=frames_scale * 2,
+            origin_radius=frames_scale / 5,
+            axes_radius=frames_scale / 10,
         )
         server.scene.add_frame(
             name=f"{i}_obj_gt",
             position=object_to_world_gt[:3, 3],
             wxyz=quat_scalar_first(R.from_matrix(object_to_world_gt[:3, :3]).as_quat()),
+            axes_length=frames_scale * 2,
+            origin_radius=frames_scale / 5,
+            axes_radius=frames_scale / 10,
         )
     try:
         while True:
