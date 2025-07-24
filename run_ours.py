@@ -125,7 +125,7 @@ class LFDataset:
         mask_center = np.array(Image.open(mask_paths[len(mask_paths) // 2]))
         cam_to_world = np.loadtxt(cam_pose_paths[len(cam_pose_paths) // 2])
 
-        object_to_world = np.loadtxt(f"{frame_path}/obj_pose.txt")
+        object_to_world = np.loadtxt(f"{frame_path}/object_pose.txt")
         object_to_cam = np.linalg.inv(cam_to_world) @ object_to_world
 
         return image_center, depth_center, mask_center, object_to_cam, cam_to_world

@@ -89,9 +89,9 @@ class LFDataset:
             masks /= masks.max()
             result += (masks,)
         if self.is_ref:
-            object_to_base = np.loadtxt(f"{self.folder}/obj_pose.txt")
+            object_to_base = np.loadtxt(f"{self.folder}/object_pose.txt")
         else:
-            object_to_base = np.loadtxt(f"{frame_path}/obj_pose.txt")
+            object_to_base = np.loadtxt(f"{frame_path}/object_pose.txt")
         result += (object_to_base,)
         return result
 
