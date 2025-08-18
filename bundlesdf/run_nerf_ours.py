@@ -57,6 +57,7 @@ class LFDataset:
             self.metadata["n_views"][0], self.metadata["n_views"][1], *poses[0].shape
         )
         result = (LF, poses)
+        cam_central_pose = poses[LF.shape[0] // 2, LF.shape[1] // 2]
 
         if os.path.exists(f"{frame_path}/depth/") and self.return_depth:
             depth_paths = [
@@ -92,7 +93,8 @@ class LFDataset:
             object_to_base = np.loadtxt(f"{self.folder}/object_pose.txt")
         else:
             object_to_base = np.loadtxt(f"{frame_path}/object_pose.txt")
-        result += (object_to_base,)
+        object_to_cam = np.linalg.inv(cam_central_pose) @ object_to_base
+        result += (object_to_cam,)
         return result
 
     def load_all(self):
@@ -110,13 +112,12 @@ class LFDataset:
                 LF_poses,
                 LF_depths,
                 LF_masks,
-                object_to_base,
+                object_to_cam,
             ) = self[i]
             for s in range(LF.shape[0]):
                 for t in range(LF.shape[1]):
                     rgbs.append((LF[s, t] * 255).astype(np.uint8))
-                    cam_to_base = LF_poses[s, t]
-                    cam_to_object = np.linalg.inv(object_to_base) @ cam_to_base
+                    cam_to_object = np.linalg.inv(object_to_cam)
                     cam_to_object_gl = cam_to_object @ glcam_in_cvcam
                     cam_in_objs.append(cam_to_object_gl)
                     if self.return_depth:
@@ -208,12 +209,12 @@ def run_neural_object_field(
 if __name__ == "__main__":
     with open("bundlesdf/config_ycbv.yml", "r") as ff:
         cfg = yaml.safe_load(ff)
-    dataset_dir = "/home/ngoncharov/LFPose/data/orb2"
+    dataset_dir = "/home/ngoncharov/LFPose/data/jug_ref"
     dataset = LFDataset(
         folder=dataset_dir,
         return_depth=True,
         return_segment=True,
-        is_ref=True,
+        is_ref=False,
     )
     rgbs, depths, masks, cam_in_objs, K = dataset.load_all()
     mesh = run_neural_object_field(
