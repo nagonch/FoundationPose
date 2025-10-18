@@ -9,6 +9,7 @@ import time
 from scipy.spatial.transform import Rotation as R
 from Utils import add_err, adds_err
 from sklearn.metrics import auc
+import yaml
 
 code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f"{code_dir}/mycpp/build")
@@ -85,9 +86,9 @@ def get_model(device: int = 0):
 
 
 class LFDataset:
-    def __init__(self, folder):
+    def __init__(self, folder, mesh_folder):
         self.folder = folder
-        self.mesh = trimesh.load(f"{folder}/model.obj")
+        self.mesh = trimesh.load(f"{mesh_folder}/model.obj")
         self.frames = list(
             sorted([item for item in sorted(os.listdir(self.folder)) if "LF_" in item])
         )
@@ -249,6 +250,101 @@ def vis_results(dataset, estimated_poses, frames_scale=0.05, apply_mask=True):
         pass
 
 
+def rotation_angle_deg(R_err):
+    trace = R_err.diagonal(dim1=-2, dim2=-1).sum(-1)
+    cos_theta = ((trace - 1) / 2).clamp(-1.0, 1.0)
+    return torch.acos(cos_theta) * (180.0 / torch.pi)
+
+
+def compute_pose_errors(gt_poses, est_poses):
+    assert gt_poses.shape == est_poses.shape
+    assert gt_poses.shape[-2:] == (4, 4)
+
+    N = gt_poses.shape[0]
+
+    # Absolute errors
+    R_gt = gt_poses[:, :3, :3]
+    t_gt = gt_poses[:, :3, 3]
+    R_est = est_poses[:, :3, :3]
+    t_est = est_poses[:, :3, 3]
+
+    R_err_abs = R_est @ R_gt.transpose(-1, -2)  # (N, 3, 3)
+    rot_err_abs = rotation_angle_deg(R_err_abs)  # (N,)
+    trans_err_abs = torch.norm(t_est - t_gt, dim=1)  # (N,)
+
+    # Relative errors
+    rel_rot_errs = []
+    rel_trans_errs = []
+    for i in range(N - 1):
+        T_gt_rel = torch.linalg.inv(gt_poses[i]) @ gt_poses[i + 1]
+        T_est_rel = torch.linalg.inv(est_poses[i]) @ est_poses[i + 1]
+
+        R_gt_rel = T_gt_rel[:3, :3]
+        R_est_rel = T_est_rel[:3, :3]
+        t_gt_rel = T_gt_rel[:3, 3]
+        t_est_rel = T_est_rel[:3, 3]
+
+        R_err_rel = R_est_rel @ R_gt_rel.transpose(-1, -2)
+        rel_rot_errs.append(rotation_angle_deg(R_err_rel.unsqueeze(0)))
+        rel_trans_errs.append(torch.norm(t_est_rel - t_gt_rel).unsqueeze(0))
+
+    rel_rot_errs = torch.cat(rel_rot_errs)
+    rel_trans_errs = torch.cat(rel_trans_errs)
+
+    return {
+        "mean_abs_rot_deg": rot_err_abs.mean().item(),
+        "mean_abs_trans": trans_err_abs.mean().item(),
+        "mean_rel_rot_deg": rel_rot_errs.mean().item(),
+        "mean_rel_trans": rel_trans_errs.mean().item(),
+    }
+
+
+def project_frame_to_image(object_to_cam, camera_matrix, image):
+    frame_3d = np.array(
+        [
+            [0, 0, 0, 1],
+            [0.1, 0, 0, 1],
+            [0, 0.1, 0, 1],
+            [0, 0, 0.1, 1],
+        ]
+    ).T
+
+    frame_in_cam = object_to_cam @ frame_3d
+
+    points_3d = frame_in_cam[:3, :].T
+
+    points_2d = (camera_matrix @ points_3d.T).T
+    points_2d = points_2d[:, :2] / points_2d[:, 2:]
+
+    img_vis = image.copy()
+    origin = tuple(points_2d[0].astype(int))
+    x_axis = tuple(points_2d[1].astype(int))
+    y_axis = tuple(points_2d[2].astype(int))
+    z_axis = tuple(points_2d[3].astype(int))
+
+    cv2.line(img_vis, origin, x_axis, (0, 0, 255), 2)
+    cv2.line(img_vis, origin, y_axis, (0, 255, 0), 2)
+    cv2.line(img_vis, origin, z_axis, (255, 0, 0), 2)
+
+    return img_vis
+
+
+def visualize_tracking(dataset_path, object_poses, camera_matrix, save_folder):
+    os.makedirs(save_folder, exist_ok=True)
+    frames = list(sorted(os.listdir(dataset_path)))
+    frames = [f for f in frames if "LF_" in f]
+    camera_matrix = camera_matrix.cpu().numpy()
+    for i, (frames, pose) in enumerate(zip(frames, object_poses)):
+        pose = pose.cpu().numpy()
+        all_frames = sorted(os.listdir(f"{dataset_path}/{frames}/imgs"))
+        mid_frame_path = (
+            f"{dataset_path}/{frames}/imgs/{all_frames[len(all_frames) // 2]}"
+        )
+        mid_frame = np.array(Image.open(mid_frame_path))
+        img_vis = project_frame_to_image(pose, camera_matrix, mid_frame)
+        Image.fromarray(img_vis).save(f"{save_folder}/{str(i).zfill(4)}.png")
+
+
 def get_metrics(dataset, estimated_poses, threshold_max=0.1):
     thresholds_space = np.linspace(0, threshold_max, 100)
     gt_pc = dataset.mesh.vertices.copy()
@@ -271,11 +367,26 @@ def get_metrics(dataset, estimated_poses, threshold_max=0.1):
 
 
 if __name__ == "__main__":
-    dataset_path = "/home/ngoncharov/LFPose/data/parrot_rs2"
-    dataset = LFDataset(dataset_path)
+    dataset_path = "/home/ngoncharov/LFTracking/data/box"
+    mesh_path = "/home/ngoncharov/LFTracking/data/box_ref"
+    dataset = LFDataset(dataset_path, mesh_path)
+    camera_matrix = torch.tensor(dataset.camera_matrix).float()
     model = get_model()
     model = set_object(model, dataset.mesh)
     gt_poses, poses = infer_poses(model, dataset)
+
     adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
-    print(adds_auc, add_auc)
-    vis_results(dataset, poses, apply_mask=False)
+    vis_results(dataset, poses, frames_scale=0.05, apply_mask=True)
+    gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
+    poses = torch.stack([torch.tensor(p).float() for p in poses])
+
+    # est_to_gt @ est = gt
+    # est_to_gt = gt @ inv(est)
+
+    pose_errors = compute_pose_errors(gt_poses, poses)
+
+    pose_errors.update({"adds_auc": float(adds_auc), "add_auc": float(add_auc)})
+    with open("metrics.yaml", "w") as file:
+        yaml.dump(pose_errors, file, sort_keys=False)
+    print(pose_errors)
+    visualize_tracking(dataset_path, poses, camera_matrix, "result_vis")

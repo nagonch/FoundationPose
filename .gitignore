@@ -98,6 +98,8 @@ docs/_build/
 
 # PyBuilder
 target/
+result_vis/
+metrics.yaml
 
 # Jupyter Notebook
 .ipynb_checkpoints
