@@ -13,6 +13,14 @@ import yaml, argparse
 import OpenEXR, Imath, numpy as np
 
 
+def evenly_spaced_elements(array, k=16):
+    n = len(array)
+    if n <= k:
+        return array
+    indices = np.linspace(0, n - 1, k, dtype=int)
+    return array[indices]
+
+
 def exr_depth_to_meters(path):
     file = OpenEXR.InputFile(path)
     dw = file.header()['dataWindow']
@@ -27,17 +35,21 @@ def exr_depth_to_meters(path):
 
 
 def convert_pose(pose_dict):
+    transform_rot = R.from_euler("xyz", [180, 0, 0], degrees=True).as_matrix()
+    transform_4x4 = np.eye(4)
+    transform_4x4[:3, :3] = transform_rot
     location = np.array(pose_dict['loc'])
     rotation = pose_dict['rot'][1:] + [pose_dict['rot'][0]]
     rotation = R.from_quat(rotation).as_matrix()
     pose = np.eye(4)
     pose[:3, :3] = rotation
     pose[:3, 3] = location
-    return pose
+    return pose @ transform_4x4
 
 def compute_intrinsic_matrix(camera_data, image_width, image_height):
     focal_length = camera_data["focal_length"]
-    sensor_width = sensor_height = camera_data["sensor_width"]
+    sensor_width  = camera_data["sensor_width"]
+    sensor_height = sensor_width * (image_height / image_width)
 
     fx = focal_length * (image_width / sensor_width)
     fy = focal_length * (image_height / sensor_height)
@@ -86,8 +98,9 @@ def load_data(dataset_dir):
     cam_poses = np.stack(cam_poses, axis=0)
     Ks = np.stack(Ks, axis=0)
     obj_poses = np.stack(obj_poses, axis=0)
-    cam_in_objs = np.linalg.inv(obj_poses) @ cam_poses
-    cam_in_objs = glcam_in_cvcam @ cam_in_objs
+    obj_to_cam = np.linalg.inv(cam_poses) @ obj_poses
+    cam_in_objs = np.linalg.inv(obj_to_cam)
+    cam_in_objs =  cam_in_objs @ glcam_in_cvcam
 
     depths_folder = f'{dataset_dir}/depth'
     depths = []
@@ -105,9 +118,7 @@ def load_data(dataset_dir):
 
     depth_masks = np.stack(depth_masks, axis=0)
     depth_masks =  (depth_masks < 1e8).astype(np.uint8) * 255
-    Image.fromarray(depth_masks[0]).save('debug_mask.png')
-
-    return images, None, None, cam_in_objs, Ks[0]
+    return evenly_spaced_elements(images), evenly_spaced_elements(depths), evenly_spaced_elements(depth_masks), evenly_spaced_elements(cam_in_objs).astype(np.float64), Ks[0]
 
 
 def run_neural_object_field(
@@ -188,16 +199,16 @@ if __name__ == "__main__":
     with open("bundlesdf/config_ycbv.yml", "r") as ff:
         cfg = yaml.safe_load(ff)
     dataset_dir = 'bundlesdf/data_jim/teapot_clutter'
-    rgbs, depths, masks, cam_in_objs, K = load_data(dataset_dir) 
-    # mesh = run_neural_object_field(
-    #     cfg,
-    #     K,
-    #     rgbs,
-    #     depths,
-    #     masks,
-    #     cam_in_objs,
-    #     save_dir=dataset_dir + "/mesh",
-    # )
-    # out_file = f"{dataset_dir}/model.obj"
-    # os.makedirs(os.path.dirname(out_file), exist_ok=True)
-    # mesh.export(out_file)
+    rgbs, depths, masks, cam_in_objs, K = load_data(dataset_dir)
+    mesh = run_neural_object_field(
+        cfg,
+        K,
+        rgbs,
+        depths,
+        masks,
+        cam_in_objs,
+        save_dir=dataset_dir + "/mesh",
+    )
+    out_file = f"{dataset_dir}/model.obj"
+    os.makedirs(os.path.dirname(out_file), exist_ok=True)
+    mesh.export(out_file)
