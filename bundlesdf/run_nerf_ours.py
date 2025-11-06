@@ -209,7 +209,7 @@ def run_neural_object_field(
 if __name__ == "__main__":
     with open("bundlesdf/config_ycbv.yml", "r") as ff:
         cfg = yaml.safe_load(ff)
-    dataset_dir = "/home/ngoncharov/LFTracking/data/box_ref"
+    dataset_dir = "holder_ref"
     dataset = LFDataset(
         folder=dataset_dir,
         return_depth=True,
