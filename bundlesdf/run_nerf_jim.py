@@ -21,8 +21,30 @@ def convert_pose(pose_dict):
     pose[:3, 3] = location
     return pose
 
+def compute_intrinsic_matrix(camera_data, image_width, image_height):
+    focal_length = camera_data["focal_length"]
+    sensor_width = sensor_height = camera_data["sensor_width"]
+
+    fx = focal_length * (image_width / sensor_width)
+    fy = focal_length * (image_height / sensor_height)
+    cx = image_width / 2.0
+    cy = image_height / 2.0
+
+    K = np.array([
+        [fx, 0,  cx],
+        [0,  fy, cy],
+        [0,  0,  1]
+    ], dtype=float)
+
+    return K
+
+
 
 def load_data(dataset_dir):
+    glcam_in_cvcam = np.array(
+        [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]]
+    ).astype(float)
+
     imgs_folder = f'{dataset_dir}/images'
     images = []
     for fname in sorted(os.listdir(imgs_folder)):
@@ -31,22 +53,29 @@ def load_data(dataset_dir):
     images = np.stack(images, axis=0)
     
     cam_params_folder = f'{dataset_dir}/cam_params'
-    cam_params = []
+    Ks = []
     cam_poses = []
     for fname in sorted(os.listdir(cam_params_folder)):
         with open(f'{cam_params_folder}/{fname}', 'r') as f:
             cam_param = json.load(f)
-        cam_params.append(cam_param)
+        Ks.append(compute_intrinsic_matrix(cam_param, img.shape[1], img.shape[0]))
         cam_poses.append(convert_pose(cam_param))
-    print(cam_poses)
-    raise
+    
     obj_poses_folder = f'{dataset_dir}/Poses'
     obj_poses = []
     for fname in sorted(os.listdir(obj_poses_folder)):
         with open(f'{obj_poses_folder}/{fname}', 'r') as f:
             obj_pose = json.load(f)
         obj_poses.append(convert_pose(obj_pose))
-    print(obj_poses)
+
+    images = np.stack(images, axis=0)
+    cam_poses = np.stack(cam_poses, axis=0)
+    Ks = np.stack(Ks, axis=0)
+    obj_poses = np.stack(obj_poses, axis=0)
+    cam_in_objs = np.linalg.inv(obj_poses) @ cam_poses
+    cam_in_objs = glcam_in_cvcam @ cam_in_objs
+
+    return images, None, None, cam_in_objs, Ks[0]
 
 
 def run_neural_object_field(
