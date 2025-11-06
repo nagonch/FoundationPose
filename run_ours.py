@@ -165,6 +165,13 @@ def infer_poses(model, dataset):
             )
         gt_poses.append(gt_pose)
         poses.append(pose)
+
+    pose_est_0 = poses[0]
+    pose_gt_0 = gt_poses[0]
+    est_to_gt = (
+        np.linalg.inv(pose_est_0) @ pose_gt_0
+    )  # only evaluate tracking, without pose estiamtion
+    poses = [p @ est_to_gt for p in poses]
     return gt_poses, poses
 
 
@@ -376,12 +383,9 @@ if __name__ == "__main__":
     gt_poses, poses = infer_poses(model, dataset)
 
     adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
-    vis_results(dataset, poses, frames_scale=0.05, apply_mask=True)
+    # vis_results(dataset, poses, frames_scale=0.05, apply_mask=True)
     gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
     poses = torch.stack([torch.tensor(p).float() for p in poses])
-
-    # est_to_gt @ est = gt
-    # est_to_gt = gt @ inv(est)
 
     pose_errors = compute_pose_errors(gt_poses, poses)
 
