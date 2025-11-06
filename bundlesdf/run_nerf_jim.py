@@ -10,6 +10,20 @@ sys.path.append(f"{code_dir}/../")
 from datareader import *
 from bundlesdf.tool import *
 import yaml, argparse
+import OpenEXR, Imath, numpy as np
+
+
+def exr_depth_to_meters(path):
+    file = OpenEXR.InputFile(path)
+    dw = file.header()['dataWindow']
+    width  = dw.max.x - dw.min.x + 1
+    height = dw.max.y - dw.min.y + 1
+    pt = Imath.PixelType(Imath.PixelType.FLOAT)
+    raw = file.channel('Z', pt)
+    depth = np.frombuffer(raw, dtype=np.float32).reshape(height, width)
+    result = np.copy(depth)
+    result[result <= 0] = np.nan
+    return result
 
 
 def convert_pose(pose_dict):
@@ -74,6 +88,24 @@ def load_data(dataset_dir):
     obj_poses = np.stack(obj_poses, axis=0)
     cam_in_objs = np.linalg.inv(obj_poses) @ cam_poses
     cam_in_objs = glcam_in_cvcam @ cam_in_objs
+
+    depths_folder = f'{dataset_dir}/depth'
+    depths = []
+    for fname in sorted(os.listdir(depths_folder)):
+        depth = exr_depth_to_meters(f'{depths_folder}/{fname}')
+        depths.append(depth)
+
+    depths = np.stack(depths, axis=0)
+
+    depth_masks_folder = f'{dataset_dir}/depth_masks'
+    depth_masks = []
+    for fname in sorted(os.listdir(depth_masks_folder)):
+        depth_mask = exr_depth_to_meters(f'{depth_masks_folder}/{fname}')
+        depth_masks.append(depth_mask)
+
+    depth_masks = np.stack(depth_masks, axis=0)
+    depth_masks =  (depth_masks < 1e8).astype(np.uint8) * 255
+    Image.fromarray(depth_masks[0]).save('debug_mask.png')
 
     return images, None, None, cam_in_objs, Ks[0]
 
@@ -156,11 +188,7 @@ if __name__ == "__main__":
     with open("bundlesdf/config_ycbv.yml", "r") as ff:
         cfg = yaml.safe_load(ff)
     dataset_dir = 'bundlesdf/data_jim/teapot_clutter'
-    rgbs, depths, masks, cam_in_objs, K = load_data(dataset_dir)
-    print(rgbs)
-    print(depths)
-    print(masks)
-    print(cam_in_objs)  
+    rgbs, depths, masks, cam_in_objs, K = load_data(dataset_dir) 
     # mesh = run_neural_object_field(
     #     cfg,
     #     K,
