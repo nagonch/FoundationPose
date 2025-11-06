@@ -41,10 +41,11 @@ def convert_pose(pose_dict):
     location = np.array(pose_dict['loc'])
     rotation = pose_dict['rot'][1:] + [pose_dict['rot'][0]]
     rotation = R.from_quat(rotation).as_matrix()
+    scale = pose_dict.get('scale', 1)
     pose = np.eye(4)
     pose[:3, :3] = rotation
     pose[:3, 3] = location
-    return pose @ transform_4x4
+    return pose @ transform_4x4, scale
 
 def compute_intrinsic_matrix(camera_data, image_width, image_height):
     focal_length = camera_data["focal_length"]
@@ -85,14 +86,15 @@ def load_data(dataset_dir):
         with open(f'{cam_params_folder}/{fname}', 'r') as f:
             cam_param = json.load(f)
         Ks.append(compute_intrinsic_matrix(cam_param, img.shape[1], img.shape[0]))
-        cam_poses.append(convert_pose(cam_param))
+        cam_poses.append(convert_pose(cam_param)[0])
     
     obj_poses_folder = f'{dataset_dir}/Poses'
     obj_poses = []
     for fname in sorted(os.listdir(obj_poses_folder)):
         with open(f'{obj_poses_folder}/{fname}', 'r') as f:
             obj_pose = json.load(f)
-        obj_poses.append(convert_pose(obj_pose))
+            pose, scale = convert_pose(obj_pose)
+        obj_poses.append(pose)
 
     images = np.stack(images, axis=0)
     cam_poses = np.stack(cam_poses, axis=0)
@@ -118,6 +120,8 @@ def load_data(dataset_dir):
 
     depth_masks = np.stack(depth_masks, axis=0)
     depth_masks =  (depth_masks < 1e8).astype(np.uint8) * 255
+    cam_in_objs[:, :3, 3] /= scale
+    depths /= scale
     return evenly_spaced_elements(images), evenly_spaced_elements(depths), evenly_spaced_elements(depth_masks), evenly_spaced_elements(cam_in_objs).astype(np.float64), Ks[0]
 
 
