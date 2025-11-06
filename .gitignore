@@ -75,6 +75,7 @@ weights/
 .pytest_cache/
 *.pth
 weights/
+bundlesdf/data_jim
 # Translations
 *.mo
 *.pot

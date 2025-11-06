@@ -374,8 +374,8 @@ def get_metrics(dataset, estimated_poses, threshold_max=0.1):
 
 
 if __name__ == "__main__":
-    dataset_path = "/home/ngoncharov/LFTracking/data/box"
-    mesh_path = "/home/ngoncharov/LFTracking/data/box_ref"
+    dataset_path = "/home/ngoncharov/LFTracking/data/teabox"
+    mesh_path = "/home/ngoncharov/LFTracking/data/teabox_ref"
     dataset = LFDataset(dataset_path, mesh_path)
     camera_matrix = torch.tensor(dataset.camera_matrix).float()
     model = get_model()
@@ -393,4 +393,4 @@ if __name__ == "__main__":
     with open("metrics.yaml", "w") as file:
         yaml.dump(pose_errors, file, sort_keys=False)
     print(pose_errors)
-    visualize_tracking(dataset_path, poses, camera_matrix, "result_vis")
+    visualize_tracking(dataset_path, gt_poses, camera_matrix, "result_vis_teabox")
