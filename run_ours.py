@@ -10,6 +10,8 @@ from scipy.spatial.transform import Rotation as R
 from Utils import add_err, adds_err
 from sklearn.metrics import auc
 import yaml
+from plenpy.lightfields import LightField
+
 
 code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f"{code_dir}/mycpp/build")
@@ -85,15 +87,105 @@ def get_model(device: int = 0):
     return est
 
 
+def robust_sigma_mad(x):
+    x = np.asarray(x)
+    med = np.median(x)
+    mad = np.median(np.abs(x - med))
+    return 1.4826 * mad
+
+
+def get_disparity_range(disparity, sigma=1.5):
+    disparity = disparity.reshape(-1)
+    disp_centroid = np.median(disparity)
+    disp_std = robust_sigma_mad(disparity)
+    disp_min, disp_max = (
+        disp_centroid - sigma * disp_std,
+        disp_centroid + sigma * disp_std,
+    )
+    return disp_min, disp_max
+
+
+def weighted_fusion(disp, conf):
+    confidence = np.nanmean(conf**2, axis=-1)
+    disparity = np.nanmean(disp * conf**2, axis=-1) / confidence
+    confidence = np.sqrt(confidence)
+    return disparity, confidence
+
+
+def denoise_disparity(disparity, disp_min, disp_max, denoise_param=35):
+    disparity = np.nan_to_num(disparity, nan=0.0)
+    disparity = (disparity - disp_min) / (disp_max - disp_min) * 255
+    disparity = disparity.astype(np.uint8)
+    disparity = cv2.fastNlMeansDenoising(disparity, h=denoise_param)
+    disparity = disparity / 255 * (disp_max - disp_min) + disp_min
+    return disparity
+
+
+def get_LF_disparity(LF, denoise_param=35, sigma=1.5):
+    disparity, confidence = LightField(LF).get_disparity(
+        vmin=-100, vmax=100, fusion_method="no_fusion"
+    )
+    disparity = np.abs(disparity)
+    disparity = np.nan_to_num(disparity, nan=0.0)
+    disp_min, disp_max = get_disparity_range(disparity, sigma=sigma)
+    disparity = np.clip(disparity, disp_min, disp_max)
+    disparity, confidence = weighted_fusion(disparity, confidence)
+    disparity = denoise_disparity(
+        disparity,
+        disp_min,
+        disp_max,
+        denoise_param=denoise_param,
+    )
+    return disparity, confidence
+
+
+def fuse_disparities(
+    disparity,
+    dam_disparity,
+    sanity_mask,
+    max_disparity=100,
+):
+    sanity_mask = sanity_mask & (disparity < max_disparity)
+    reliable_disparities = disparity[sanity_mask].reshape(-1).float()
+    corresponding_dam_disparities = dam_disparity[sanity_mask].reshape(-1).float()
+    X = torch.stack(
+        [corresponding_dam_disparities, torch.ones_like(corresponding_dam_disparities)],
+        dim=1,
+    )
+    sol = torch.linalg.lstsq(X, reliable_disparities).solution
+    alpha, beta = sol[0], sol[1]
+    result_disparities = alpha * dam_disparity + beta
+    return result_disparities
+
+
+def get_frame_disparity(LF, dam_disparity, min_fit_confidence=0.9):
+    LF_disparity, confidence = get_LF_disparity(
+        LF,
+    )
+    LF_disparity, confidence = (
+        torch.tensor(LF_disparity).cuda(),
+        torch.tensor(confidence).cuda(),
+    )
+    dam_disparity = torch.tensor(dam_disparity, device=LF_disparity.device)
+    sanity_mask = confidence > min_fit_confidence
+    result_disparity = fuse_disparities(
+        LF_disparity, dam_disparity, sanity_mask=sanity_mask
+    )
+    return result_disparity
+
+
 class LFDataset:
-    def __init__(self, folder, mesh_folder):
+    def __init__(self, folder, mesh_folder, use_dam=False):
         self.folder = folder
+        self.use_dam = use_dam
         self.mesh = trimesh.load(f"{mesh_folder}/model.obj")
         self.frames = list(
             sorted([item for item in sorted(os.listdir(self.folder)) if "LF_" in item])
-        )
+        )[1:]
         self.size = len(self.frames)
         self.camera_matrix = np.array(np.loadtxt(f"{self.folder}/camera_matrix.txt"))
+        with open(f"{self.folder}/metadata.json", "r") as f:
+            self.metadata = json.load(f)
 
     def __len__(self):
         return self.size
@@ -128,8 +220,30 @@ class LFDataset:
 
         object_to_world = np.loadtxt(f"{frame_path}/object_pose.txt")
         object_to_cam = np.linalg.inv(cam_to_world) @ object_to_world
+        if self.use_dam:
+            LF = np.stack([np.array(Image.open(p)) for p in img_paths]).reshape(
+                self.metadata["n_views"][0],
+                self.metadata["n_views"][1],
+                *image_center.shape,
+            )
+            dam_disparity = np.load(f"{frame_path}/DAM_depth.npy")
+            disparity = get_frame_disparity(LF, dam_disparity).cpu().numpy()
+            depth_dam = (
+                self.camera_matrix[0, 0]
+                * self.metadata["x_spacing"]
+                / (disparity + 1e-8)
+            )
+        else:
+            depth_dam = None
 
-        return image_center, depth_center, mask_center, object_to_cam, cam_to_world
+        return (
+            image_center,
+            depth_center,
+            mask_center,
+            object_to_cam,
+            cam_to_world,
+            depth_dam,
+        )
 
 
 def set_object(model, mesh):
@@ -141,11 +255,13 @@ def set_object(model, mesh):
     return model
 
 
-def infer_poses(model, dataset):
+def infer_poses(model, dataset, use_dam=False):
     gt_poses = []
     poses = []
     for i in range(len(dataset)):
-        img, depth_image, mask_image, gt_pose, _ = dataset[i]
+        img, depth_image, mask_image, gt_pose, _, dam_depth = dataset[i]
+        if use_dam:
+            depth_image = dam_depth
         depth_image = np.ma.masked_equal(depth_image, 0)
         if i == 0:
             pose = model.register(
@@ -358,7 +474,7 @@ def get_metrics(dataset, estimated_poses, threshold_max=0.1):
     adds_vals = []
     add_vals = []
     for i in range(len(dataset)):
-        _, _, _, object_to_cam, _ = dataset[i]
+        _, _, _, object_to_cam, _, _ = dataset[i]
         estimated_pose = estimated_poses[i]
         add_val = add_err(estimated_pose, object_to_cam, gt_pc)
         adds_val = adds_err(estimated_pose, object_to_cam, gt_pc)
@@ -374,13 +490,15 @@ def get_metrics(dataset, estimated_poses, threshold_max=0.1):
 
 
 if __name__ == "__main__":
-    dataset_path = "/home/ngoncharov/LFTracking/data/teabox"
-    mesh_path = "/home/ngoncharov/LFTracking/data/teabox_ref"
-    dataset = LFDataset(dataset_path, mesh_path)
+    dataset_path = "/home/ngoncharov/LFTracking/data/jug_motion"
+    mesh_path = "/home/ngoncharov/LFTracking/data/jug_ref"
+    use_dam = False
+
+    dataset = LFDataset(dataset_path, mesh_path, use_dam)
     camera_matrix = torch.tensor(dataset.camera_matrix).float()
     model = get_model()
     model = set_object(model, dataset.mesh)
-    gt_poses, poses = infer_poses(model, dataset)
+    gt_poses, poses = infer_poses(model, dataset, use_dam)
 
     adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
     # vis_results(dataset, poses, frames_scale=0.05, apply_mask=True)
@@ -390,7 +508,8 @@ if __name__ == "__main__":
     pose_errors = compute_pose_errors(gt_poses, poses)
 
     pose_errors.update({"adds_auc": float(adds_auc), "add_auc": float(add_auc)})
-    with open("metrics.yaml", "w") as file:
+    with open("metrics_jug.yaml", "w") as file:
         yaml.dump(pose_errors, file, sort_keys=False)
     print(pose_errors)
-    visualize_tracking(dataset_path, gt_poses, camera_matrix, "result_vis_teabox")
+    visualize_tracking(dataset_path, poses, camera_matrix, "results_vis_jug")
+    visualize_tracking(dataset_path, poses, camera_matrix, "results_vis_gt")
