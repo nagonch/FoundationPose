@@ -440,7 +440,7 @@ def vis_results(
         )
         pc.transform(cam_to_world)
         mesh_pc = toOpen3dCloud(mesh_points)
-        mesh_pc.transform(object_to_cam_est)
+        mesh_pc.transform(object_to_world_est)
         server.scene.add_point_cloud(
             f"my_point_cloud_{i}",
             np.array(pc.points),
