@@ -291,7 +291,9 @@ def infer_poses(model, dataset, use_dam=False):
     return gt_poses, poses
 
 
-def vis_results(dataset, estimated_poses, frames_scale=0.05, apply_mask=True):
+def vis_results(
+    dataset, mesh_points, estimated_poses, frames_scale=0.05, apply_mask=True
+):
     server = viser.ViserServer()
 
     @server.on_client_connect
@@ -301,7 +303,7 @@ def vis_results(dataset, estimated_poses, frames_scale=0.05, apply_mask=True):
 
     camera_matrix = dataset.camera_matrix
     for i in range(len(dataset)):
-        image_center, depth_center, mask, object_to_cam, cam_to_world = dataset[i]
+        image_center, depth_center, mask, object_to_cam, cam_to_world, _ = dataset[i]
         # 2D vis
         vis = draw_xyz_axis(
             image_center,
@@ -328,10 +330,18 @@ def vis_results(dataset, estimated_poses, frames_scale=0.05, apply_mask=True):
             image_center, depth_center, camera_matrix, depth_thresh=0.1
         )
         pc.transform(cam_to_world)
+        mesh_pc = toOpen3dCloud(mesh_points)
+        mesh_pc.transform(object_to_world_est)
         server.scene.add_point_cloud(
             f"my_point_cloud_{i}",
             np.array(pc.points),
             np.array(pc.colors),
+            point_size=1e-4,
+        )
+        server.scene.add_point_cloud(
+            f"mesh_pc_{i}",
+            np.array(mesh_pc.points),
+            colors=[1.0, 0.0, 0.0],
             point_size=1e-4,
         )
         server.scene.add_camera_frustum(
@@ -454,7 +464,6 @@ def project_frame_to_image(object_to_cam, camera_matrix, image):
 
 def visualize_tracking(dataset_path, object_poses, camera_matrix, save_folder):
     os.makedirs(save_folder, exist_ok=True)
-    frames = list(sorted(os.listdir(dataset_path)))
     frames = [f for f in frames if "LF_" in f]
     camera_matrix = camera_matrix.cpu().numpy()
     for i, (frames, pose) in enumerate(zip(frames, object_poses)):
@@ -491,22 +500,23 @@ def get_metrics(dataset, estimated_poses, threshold_max=0.1):
 
 if __name__ == "__main__":
     dataset_path = "/home/ngoncharov/LFTracking/data/box"
-    mesh_path = "bundlesdf/data_jim/car_diffuse"
+    mesh_path = "/home/ngoncharov/LFTracking/data/box_ref"
     use_dam = False
 
     dataset = LFDataset(dataset_path, mesh_path, use_dam)
-    print(type(dataset.camera_matrix), dataset.camera_matrix.dtype)
-    for item in dataset[0]:
-        if item is not None:
-            print(type(item), item.dtype)
-    raise
     camera_matrix = torch.tensor(dataset.camera_matrix).float()
     model = get_model()
     model = set_object(model, dataset.mesh)
     gt_poses, poses = infer_poses(model, dataset, use_dam)
 
     adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
-    # vis_results(dataset, poses, frames_scale=0.05, apply_mask=True)
+    vis_results(
+        dataset,
+        np.array(dataset.mesh.vertices),
+        poses,
+        frames_scale=0.05,
+        apply_mask=True,
+    )
     gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
     poses = torch.stack([torch.tensor(p).float() for p in poses])
 
