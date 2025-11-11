@@ -11,6 +11,37 @@ from Utils import add_err, adds_err
 from sklearn.metrics import auc
 import yaml
 from plenpy.lightfields import LightField
+import OpenEXR
+import quaternion
+
+
+def pose_blender_to_opencv(pose):
+    transform_rot = R.from_euler("xyz", [180, 0, 0], degrees=True).as_matrix()
+    transform_4x4 = np.eye(4)
+    transform_4x4[:3, :3] = transform_rot
+    return pose @ torch.tensor(transform_4x4, device=pose.device, dtype=pose.dtype)
+
+
+def open_exr(f_name: str):
+    with OpenEXR.File(f_name) as infile:
+        header = infile.header()
+        channels = infile.channels()
+        keys = list(channels.keys())
+        if keys == ["RGB"]:
+            img = channels["RGB"].pixels
+        elif keys == ["X", "Y", "Z"]:
+            X = channels["X"].pixels
+            Y = channels["Y"].pixels
+            Z = channels["Z"].pixels
+
+            height, width = Z.shape
+
+            img = np.empty((height, width, 3))
+            img[..., 0] = X
+            img[..., 1] = Y
+            img[..., 2] = Z
+
+    return img, header
 
 
 code_dir = os.path.dirname(os.path.realpath(__file__))
@@ -174,75 +205,152 @@ def get_frame_disparity(LF, dam_disparity, min_fit_confidence=0.9):
     return result_disparity
 
 
-class LFDataset:
-    def __init__(self, folder, mesh_folder, use_dam=False):
+class LFSynthData:
+    def __init__(self, folder, start_idx=5):
         self.folder = folder
-        self.use_dam = use_dam
-        self.mesh = trimesh.load(f"{mesh_folder}/model.obj")
-        self.frames = list(
-            sorted([item for item in sorted(os.listdir(self.folder)) if "LF_" in item])
-        )[1:]
+        self.start_idx = start_idx
+        self.lf_dir = os.path.join(folder, "LF_images")
+        self.cam_dir = os.path.join(folder, "Cam_params")
+        self.depth_dir = os.path.join(folder, "depth")
+        self.target_pose_dir = os.path.join(folder, "Poses")
+        self.dam_depth_dir = os.path.join(folder, "dam_depths")
+
+        frame_dirs = os.listdir(self.lf_dir)
+        frame_nums = []
+        for frame_dir in frame_dirs:
+            if "frame_" in frame_dir:
+                frame_num = int(frame_dir[6:])
+                frame_nums.append(frame_num)
+
+        self.frame_nums = sorted(frame_nums)
+        self.frames = []
+        for f in self.frame_nums:
+            self.frames.append("frame_" + str(f))
+
         self.size = len(self.frames)
-        self.camera_matrix = np.array(np.loadtxt(f"{self.folder}/camera_matrix.txt"))
-        with open(f"{self.folder}/metadata.json", "r") as f:
-            self.metadata = json.load(f)
+
+        cam_data_path = os.path.join(self.cam_dir, self.frames[0]) + "/params.json"
+        with open(cam_data_path, "r") as file:
+            cam_data = json.load(file)
+
+        img = np.array(Image.open(os.path.join(self.lf_dir, frame_dir, "00-00.jpg")))
+        self.height, self.width, channels = img.shape
+        focal_length_px = (
+            cam_data["focal_length"] * self.width / cam_data["sensor_width"]
+        )
+
+        self.camera_matrix = (
+            torch.tensor(
+                [
+                    [focal_length_px, 0, self.width / 2],
+                    [0, focal_length_px, self.height / 2],
+                    [0, 0, 1],
+                ]
+            )
+            .double()
+            .cpu()
+            .numpy()
+        )
+
+        self.n_view_x = cam_data["n_cams_x"]
+        self.n_view_y = cam_data["n_cams_y"]
+        self.clip_start = cam_data["clip_start"]
+        self.clip_end = cam_data["clip_end"]
+        self.baseline_x = cam_data["unit_baseline_x"]
+        self.baseline_y = cam_data["unit_baseline_y"]
 
     def __len__(self):
-        return self.size
+        return 5
 
     def __getitem__(self, idx):
-        frame_path = f"{self.folder}/{self.frames[idx]}"
-        img_paths = [
-            f"{frame_path}/imgs/{item}"
-            for item in sorted(os.listdir(f"{frame_path}/imgs/"))
-            if item.endswith(".png")
-        ]
-        mask_paths = [
-            f"{frame_path}/masks/{item}"
-            for item in sorted(os.listdir(f"{frame_path}/masks/"))
-            if item.endswith(".png")
-        ]
-        depth_paths = [
-            f"{frame_path}/depth/{item}"
-            for item in sorted(os.listdir(f"{frame_path}/depth/"))
-            if item.endswith(".npy")
-        ]
-        cam_pose_paths = [
-            f"{frame_path}/poses/{item}"
-            for item in sorted(os.listdir(f"{frame_path}/poses/"))
-            if item.endswith(".txt")
-        ]
-        center_image_path = img_paths[len(img_paths) // 2]
-        image_center = np.array(Image.open(center_image_path))
-        depth_center = np.load(depth_paths[len(depth_paths) // 2]) / 1000.0
-        mask_center = np.array(Image.open(mask_paths[len(mask_paths) // 2]))
-        cam_to_world = np.loadtxt(cam_pose_paths[len(cam_pose_paths) // 2])
+        idx += self.start_idx
+        img_dir = os.path.join(self.lf_dir, self.frames[idx])
+        lf_arr = np.empty((self.n_view_y, self.n_view_x, self.height, self.width, 3))
+        depth_arr = np.empty((self.n_view_y, self.n_view_x, self.height, self.width))
+        masks_arr = np.empty((self.n_view_y, self.n_view_x, self.height, self.width))
 
-        object_to_world = np.loadtxt(f"{frame_path}/object_pose.txt")
-        object_to_cam = np.linalg.inv(cam_to_world) @ object_to_world
-        if self.use_dam:
-            LF = np.stack([np.array(Image.open(p)) for p in img_paths]).reshape(
-                self.metadata["n_views"][0],
-                self.metadata["n_views"][1],
-                *image_center.shape,
-            )
-            dam_disparity = np.load(f"{frame_path}/DAM_depth.npy")
-            disparity = get_frame_disparity(LF, dam_disparity).cpu().numpy()
-            depth_dam = (
-                self.camera_matrix[0, 0]
-                * self.metadata["x_spacing"]
-                / (disparity + 1e-8)
-            )
-        else:
-            depth_dam = None
+        for u in range(self.n_view_y):
+            for v in range(self.n_view_x):
+                # Load light field images
+                view_name = f"{u:02d}-{v:02d}"
+                img_name = os.path.join(img_dir, view_name)
+                img = np.array(Image.open(img_name + ".jpg"))
+                lf_arr[u, v] = img
 
+                # Load light field depths
+                depth_name = os.path.join(
+                    self.depth_dir, self.frames[idx], view_name + ".exr"
+                )
+                depth_map, _ = open_exr(depth_name)
+                depth_arr[u, v] = depth_map[:, :, 0]
+        masks = []
+        mask_dir = img_dir.replace("LF_images", "sam_masks")
+        for fname in list(sorted(os.listdir(mask_dir))):
+            mask = Image.open(os.path.join(mask_dir, fname))
+            mask = np.array(mask)
+            masks.append(mask)
+        masks = np.stack(masks, axis=0)
+        masks_arr = masks.reshape(self.n_view_y, self.n_view_x, self.height, self.width)
+
+        LF = torch.tensor(lf_arr) / lf_arr.max()
+        depth_arr = np.where(depth_arr > self.clip_end, np.nan, depth_arr)
+        depths = torch.tensor(depth_arr)
+
+        cam_data_path = os.path.join(self.cam_dir, self.frames[idx]) + "/params.json"
+        with open(cam_data_path, "r") as file:
+            cam_data = json.load(file)
+
+        cam_loc = cam_data["loc"]
+        cam_q = quaternion.quaternion(*cam_data["rot"])
+        cam_rot_mat = quaternion.as_rotation_matrix(cam_q)
+
+        n_centre_x = (self.n_view_x - 1) / 2
+        n_centre_y = (self.n_view_y - 1) / 2
+
+        cam_poses = np.zeros((self.n_view_y, self.n_view_x, 4, 4))
+        cam_poses[..., 0:3, 0:3] = cam_rot_mat
+        cam_poses[..., 3, 3] = 1
+
+        for u in range(self.n_view_y):
+            shift_y = u - n_centre_y
+            cam_shift_y = shift_y * self.baseline_y
+            for v in range(self.n_view_x):
+                shift_x = v - n_centre_x
+                cam_shift_x = shift_x * self.baseline_x
+                cam_shift = np.array([cam_shift_x, cam_shift_y, 0])
+
+                cam_shift_world = quaternion.rotate_vectors(cam_q, cam_shift)
+                cam_poses[u, v, 0:3, 3] = cam_loc + cam_shift_world
+
+        s_mid, t_mid = LF.shape[0] // 2, LF.shape[1] // 2
+        cam_poses = torch.tensor(cam_poses)
+        cam_poses = pose_blender_to_opencv(cam_poses)
+
+        with open(self.target_pose_dir + "/frame_" + str(idx) + ".json", "r") as file:
+            obj_data = json.load(file)
+        obj_loc = obj_data["loc"]
+        obj_q = quaternion.quaternion(*obj_data["rot"])
+        obj_rot_mat = quaternion.as_rotation_matrix(obj_q)
+        obj_pose = np.zeros((4, 4))
+        obj_pose[0:3, 0:3] = obj_rot_mat
+        obj_pose[0:3, 3] = obj_loc
+        obj_pose[3, 3] = 1
+        obj_pose = torch.tensor(obj_pose).cuda()
+        obj_pose = pose_blender_to_opencv(obj_pose)
+
+        image_center = LF[s_mid, t_mid].cpu().numpy()
+        image_center = (image_center * 255).astype(np.uint8)
+        depth_center = depths[s_mid, t_mid].cpu().numpy()
+        mask_center = masks_arr[s_mid, t_mid]
+        cam_to_world = cam_poses[s_mid, t_mid].double().cpu().numpy()
+        object_to_cam = np.linalg.inv(cam_to_world) @ obj_pose.double().cpu().numpy()
         return (
             image_center,
             depth_center,
             mask_center,
             object_to_cam,
             cam_to_world,
-            depth_dam,
+            None,
         )
 
 
@@ -452,25 +560,17 @@ def project_frame_to_image(object_to_cam, camera_matrix, image):
     return img_vis
 
 
-def visualize_tracking(dataset_path, object_poses, camera_matrix, save_folder):
+def visualize_tracking(images_rgb, object_poses, camera_matrix, save_folder):
     os.makedirs(save_folder, exist_ok=True)
-    frames = list(sorted(os.listdir(dataset_path)))
-    frames = [f for f in frames if "LF_" in f]
-    camera_matrix = camera_matrix.cpu().numpy()
-    for i, (frames, pose) in enumerate(zip(frames, object_poses)):
+    for i, (image, pose) in enumerate(zip(images_rgb, object_poses)):
         pose = pose.cpu().numpy()
-        all_frames = sorted(os.listdir(f"{dataset_path}/{frames}/imgs"))
-        mid_frame_path = (
-            f"{dataset_path}/{frames}/imgs/{all_frames[len(all_frames) // 2]}"
-        )
-        mid_frame = np.array(Image.open(mid_frame_path))
-        img_vis = project_frame_to_image(pose, camera_matrix, mid_frame)
+        img_vis = project_frame_to_image(pose, camera_matrix, image)
         Image.fromarray(img_vis).save(f"{save_folder}/{str(i).zfill(4)}.png")
 
 
-def get_metrics(dataset, estimated_poses, threshold_max=0.1):
+def get_metrics(dataset, mesh, estimated_poses, threshold_max=0.1):
     thresholds_space = np.linspace(0, threshold_max, 100)
-    gt_pc = dataset.mesh.vertices.copy()
+    gt_pc = mesh.vertices.copy()
     adds_vals = []
     add_vals = []
     for i in range(len(dataset)):
@@ -490,22 +590,19 @@ def get_metrics(dataset, estimated_poses, threshold_max=0.1):
 
 
 if __name__ == "__main__":
-    dataset_path = "/home/ngoncharov/LFTracking/data/box"
+    dataset_path = "/home/ngoncharov/LFTracking/data/toy_car"
     mesh_path = "bundlesdf/data_jim/car_diffuse"
     use_dam = False
+    idx_start = 5
+    mesh = trimesh.load(f"{mesh_path}/model.obj")
 
-    dataset = LFDataset(dataset_path, mesh_path, use_dam)
-    print(type(dataset.camera_matrix), dataset.camera_matrix.dtype)
-    for item in dataset[0]:
-        if item is not None:
-            print(type(item), item.dtype)
-    raise
+    dataset = LFSynthData(dataset_path, start_idx=idx_start)
     camera_matrix = torch.tensor(dataset.camera_matrix).float()
     model = get_model()
-    model = set_object(model, dataset.mesh)
+    model = set_object(model, mesh)
     gt_poses, poses = infer_poses(model, dataset, use_dam)
 
-    adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
+    adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, mesh, poses)
     # vis_results(dataset, poses, frames_scale=0.05, apply_mask=True)
     gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
     poses = torch.stack([torch.tensor(p).float() for p in poses])
@@ -513,8 +610,18 @@ if __name__ == "__main__":
     pose_errors = compute_pose_errors(gt_poses, poses)
 
     pose_errors.update({"adds_auc": float(adds_auc), "add_auc": float(add_auc)})
-    with open("metrics_box_new.yaml", "w") as file:
+    with open("metrics_toy_car.yaml", "w") as file:
         yaml.dump(pose_errors, file, sort_keys=False)
     print(pose_errors)
-    visualize_tracking(dataset_path, poses, camera_matrix, "results_box_new")
-    visualize_tracking(dataset_path, poses, camera_matrix, "results_vis_gt")
+    visualize_tracking(
+        [dataset[i][0] for i in range(len(dataset))],
+        poses,
+        camera_matrix.cpu().numpy(),
+        "results_toy_car",
+    )
+    visualize_tracking(
+        [dataset[i][0] for i in range(len(dataset))],
+        gt_poses,
+        camera_matrix.cpu().numpy(),
+        "results_toy_car_gt",
+    )

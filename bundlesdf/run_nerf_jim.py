@@ -11,6 +11,8 @@ from datareader import *
 from bundlesdf.tool import *
 import yaml, argparse
 import OpenEXR, Imath, numpy as np
+import torch
+import torch.nn.functional as F
 
 
 def evenly_spaced_elements(array, k=16):
@@ -19,6 +21,56 @@ def evenly_spaced_elements(array, k=16):
         return array
     indices = np.linspace(0, n - 1, k, dtype=int)
     return array[indices]
+
+
+def emulate_depth_sensor(
+    depth_gt,  # [H, W] float32; NaNs treated as already invalid and preserved
+    base_hole_prob=0.6,  # uniform dropout probability
+    edge_hole_gain=15,  # additional dropout near edges
+):
+    """
+    Returns:
+        depth_with_holes: [H, W] with new NaNs for holes
+        holes_new:        bool [H, W] mask of *newly* created holes (excludes pre-existing NaNs)
+    Behavior:
+        p(x) = clamp(base_hole_prob + edge_hole_gain * edge_strength(x), 0, 0.95)
+        edge_strength computed via Sobel magnitude, normalized to [0,1].
+    """
+    assert depth_gt.ndim == 2 and depth_gt.dtype == torch.float32
+    device = depth_gt.device
+
+    depth = depth_gt.clone()
+    finite_mask = torch.isfinite(depth)
+    depth_finite = torch.where(finite_mask, depth, torch.zeros_like(depth))
+
+    # Sobel edges
+    kx = (
+        torch.tensor(
+            [[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype=torch.float32, device=device
+        )
+        / 8.0
+    )
+    ky = kx.t()
+
+    gx = F.conv2d(depth_finite[None, None], kx[None, None], padding=1)[0, 0]
+    gy = F.conv2d(depth_finite[None, None], ky[None, None], padding=1)[0, 0]
+    grad_mag = torch.sqrt(gx * gx + gy * gy)
+
+    # Normalize edge magnitude to [0,1]
+    gmin = torch.min(grad_mag)
+    gmax = torch.max(grad_mag)
+    grad_norm = (grad_mag - gmin) / (gmax - gmin + 1e-8)
+
+    # Hole probability field
+    hole_prob = torch.clamp(base_hole_prob + edge_hole_gain * grad_norm, 0.0, 0.95)
+
+    # Sample holes only where depth was finite
+    rand_u = torch.rand_like(depth_finite)
+    holes_new = (rand_u < hole_prob) & finite_mask
+
+    depth_with_holes = depth.clone()
+    depth_with_holes[holes_new] = float(0.0)
+    return depth_with_holes
 
 
 def exr_depth_to_meters(path):
@@ -31,6 +83,7 @@ def exr_depth_to_meters(path):
     depth = np.frombuffer(raw, dtype=np.float32).reshape(height, width)
     result = np.copy(depth)
     result[result <= 0] = np.nan
+    result = emulate_depth_sensor(torch.tensor(result)).cpu().numpy()
     return result
 
 
@@ -64,7 +117,7 @@ def compute_intrinsic_matrix(camera_data, image_width, image_height):
     return K
 
 
-def load_data(dataset_dir, downscale=10):
+def load_data(dataset_dir, actual_sequence_scale=0.1):
     glcam_in_cvcam = np.array(
         [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]]
     ).astype(float)
@@ -104,7 +157,9 @@ def load_data(dataset_dir, downscale=10):
     depths_folder = f"{dataset_dir}/depth"
     depths = []
     for fname in sorted(os.listdir(depths_folder)):
-        depth = exr_depth_to_meters(f"{depths_folder}/{fname}")
+        depth = exr_depth_to_meters(
+            f"{depths_folder}/{fname}",
+        )
         depths.append(depth)
 
     depths = np.stack(depths, axis=0)
@@ -112,13 +167,17 @@ def load_data(dataset_dir, downscale=10):
     depth_masks_folder = f"{dataset_dir}/depth_masks"
     depth_masks = []
     for fname in sorted(os.listdir(depth_masks_folder)):
-        depth_mask = exr_depth_to_meters(f"{depth_masks_folder}/{fname}")
+        depth_mask = exr_depth_to_meters(
+            f"{depth_masks_folder}/{fname}",
+        )
         depth_masks.append(depth_mask)
 
     depth_masks = np.stack(depth_masks, axis=0)
     depth_masks = (depth_masks < 1e8).astype(np.uint8) * 255
-    cam_in_objs[:, :3, 3] /= downscale
-    depths /= downscale
+    cam_in_objs[:, :3, 3] /= scale
+    depths /= scale
+    cam_in_objs[:, :3, 3] *= actual_sequence_scale
+    depths *= actual_sequence_scale
     return (
         evenly_spaced_elements(images),
         evenly_spaced_elements(depths),
@@ -206,9 +265,11 @@ if __name__ == "__main__":
     with open("bundlesdf/config_ycbv.yml", "r") as ff:
         cfg = yaml.safe_load(ff)
     dataset_dir = "bundlesdf/data_jim/car_diffuse"
-    downscale = 10
-    depth_orruption = 0.2
-    rgbs, depths, masks, cam_in_objs, K = load_data(dataset_dir, downscale)
+    actual_sequence_scale = 0.1
+    rgbs, depths, masks, cam_in_objs, K = load_data(
+        dataset_dir,
+        actual_sequence_scale,
+    )
     mesh = run_neural_object_field(
         cfg,
         K,
