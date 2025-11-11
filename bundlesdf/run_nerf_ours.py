@@ -56,8 +56,12 @@ class LFDataset:
         poses = np.stack(poses, axis=0).reshape(
             self.metadata["n_views"][0], self.metadata["n_views"][1], *poses[0].shape
         )
-        result = (LF, poses)
-        cam_central_pose = poses[LF.shape[0] // 2, LF.shape[1] // 2]
+        s_central, t_central = LF.shape[0] // 2, LF.shape[1] // 2
+        result = (
+            LF[s_central, t_central][None, None],
+            poses[s_central, t_central][None, None],
+        )
+        cam_central_pose = poses[s_central, t_central]
 
         if os.path.exists(f"{frame_path}/depth/") and self.return_depth:
             depth_paths = [
@@ -73,7 +77,7 @@ class LFDataset:
             )
             if depths.dtype == np.uint16:
                 depths = depths.astype(np.float32) / 1000.0
-            result += (depths,)
+            result += (depths[s_central, t_central][None, None],)
         if os.path.exists(f"{frame_path}/masks/") and self.return_segment:
             mask_paths = [
                 f"{frame_path}/masks/{item}"
@@ -88,7 +92,7 @@ class LFDataset:
             )
             masks = masks.astype(np.float32)
             masks /= masks.max()
-            result += (masks,)
+            result += (masks[s_central, t_central][None, None],)
         if self.is_ref:
             object_to_base = np.loadtxt(f"{self.folder}/object_pose.txt")
         else:
@@ -209,7 +213,7 @@ def run_neural_object_field(
 if __name__ == "__main__":
     with open("bundlesdf/config_ycbv.yml", "r") as ff:
         cfg = yaml.safe_load(ff)
-    dataset_dir = "holder_ref"
+    dataset_dir = "/home/ngoncharov/LFTracking/data/jug_ref"
     dataset = LFDataset(
         folder=dataset_dir,
         return_depth=True,

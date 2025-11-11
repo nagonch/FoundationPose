@@ -23,11 +23,11 @@ def evenly_spaced_elements(array, k=16):
 
 def exr_depth_to_meters(path):
     file = OpenEXR.InputFile(path)
-    dw = file.header()['dataWindow']
-    width  = dw.max.x - dw.min.x + 1
+    dw = file.header()["dataWindow"]
+    width = dw.max.x - dw.min.x + 1
     height = dw.max.y - dw.min.y + 1
     pt = Imath.PixelType(Imath.PixelType.FLOAT)
-    raw = file.channel('Z', pt)
+    raw = file.channel("Z", pt)
     depth = np.frombuffer(raw, dtype=np.float32).reshape(height, width)
     result = np.copy(depth)
     result[result <= 0] = np.nan
@@ -38,18 +38,20 @@ def convert_pose(pose_dict):
     transform_rot = R.from_euler("xyz", [180, 0, 0], degrees=True).as_matrix()
     transform_4x4 = np.eye(4)
     transform_4x4[:3, :3] = transform_rot
-    location = np.array(pose_dict['loc'])
-    rotation = pose_dict['rot'][1:] + [pose_dict['rot'][0]]
+    location = np.array(pose_dict["loc"])
+    rotation = pose_dict["rot"][1:] + [pose_dict["rot"][0]]
     rotation = R.from_quat(rotation).as_matrix()
-    scale = pose_dict.get('scale', 1)
+    scale = pose_dict.get("scale", 1)
+    scale = np.linalg.norm(np.array([scale, scale, scale]))
     pose = np.eye(4)
     pose[:3, :3] = rotation
     pose[:3, 3] = location
     return pose @ transform_4x4, scale
 
+
 def compute_intrinsic_matrix(camera_data, image_width, image_height):
     focal_length = camera_data["focal_length"]
-    sensor_width  = camera_data["sensor_width"]
+    sensor_width = camera_data["sensor_width"]
     sensor_height = sensor_width * (image_height / image_width)
 
     fx = focal_length * (image_width / sensor_width)
@@ -57,41 +59,36 @@ def compute_intrinsic_matrix(camera_data, image_width, image_height):
     cx = image_width / 2.0
     cy = image_height / 2.0
 
-    K = np.array([
-        [fx, 0,  cx],
-        [0,  fy, cy],
-        [0,  0,  1]
-    ], dtype=float)
+    K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
 
     return K
 
 
-
-def load_data(dataset_dir):
+def load_data(dataset_dir, downscale=10):
     glcam_in_cvcam = np.array(
         [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]]
     ).astype(float)
 
-    imgs_folder = f'{dataset_dir}/images'
+    imgs_folder = f"{dataset_dir}/images"
     images = []
     for fname in sorted(os.listdir(imgs_folder)):
-        img = np.array(Image.open(f'{imgs_folder}/{fname}'))
+        img = np.array(Image.open(f"{imgs_folder}/{fname}"))
         images.append(img)
     images = np.stack(images, axis=0)
-    
-    cam_params_folder = f'{dataset_dir}/cam_params'
+
+    cam_params_folder = f"{dataset_dir}/cam_params"
     Ks = []
     cam_poses = []
     for fname in sorted(os.listdir(cam_params_folder)):
-        with open(f'{cam_params_folder}/{fname}', 'r') as f:
+        with open(f"{cam_params_folder}/{fname}", "r") as f:
             cam_param = json.load(f)
         Ks.append(compute_intrinsic_matrix(cam_param, img.shape[1], img.shape[0]))
         cam_poses.append(convert_pose(cam_param)[0])
-    
-    obj_poses_folder = f'{dataset_dir}/Poses'
+
+    obj_poses_folder = f"{dataset_dir}/Poses"
     obj_poses = []
     for fname in sorted(os.listdir(obj_poses_folder)):
-        with open(f'{obj_poses_folder}/{fname}', 'r') as f:
+        with open(f"{obj_poses_folder}/{fname}", "r") as f:
             obj_pose = json.load(f)
             pose, scale = convert_pose(obj_pose)
         obj_poses.append(pose)
@@ -102,27 +99,33 @@ def load_data(dataset_dir):
     obj_poses = np.stack(obj_poses, axis=0)
     obj_to_cam = np.linalg.inv(cam_poses) @ obj_poses
     cam_in_objs = np.linalg.inv(obj_to_cam)
-    cam_in_objs =  cam_in_objs @ glcam_in_cvcam
+    cam_in_objs = cam_in_objs @ glcam_in_cvcam
 
-    depths_folder = f'{dataset_dir}/depth'
+    depths_folder = f"{dataset_dir}/depth"
     depths = []
     for fname in sorted(os.listdir(depths_folder)):
-        depth = exr_depth_to_meters(f'{depths_folder}/{fname}')
+        depth = exr_depth_to_meters(f"{depths_folder}/{fname}")
         depths.append(depth)
 
     depths = np.stack(depths, axis=0)
 
-    depth_masks_folder = f'{dataset_dir}/depth_masks'
+    depth_masks_folder = f"{dataset_dir}/depth_masks"
     depth_masks = []
     for fname in sorted(os.listdir(depth_masks_folder)):
-        depth_mask = exr_depth_to_meters(f'{depth_masks_folder}/{fname}')
+        depth_mask = exr_depth_to_meters(f"{depth_masks_folder}/{fname}")
         depth_masks.append(depth_mask)
 
     depth_masks = np.stack(depth_masks, axis=0)
-    depth_masks =  (depth_masks < 1e8).astype(np.uint8) * 255
-    cam_in_objs[:, :3, 3] /= scale
-    depths /= scale
-    return evenly_spaced_elements(images), evenly_spaced_elements(depths), evenly_spaced_elements(depth_masks), evenly_spaced_elements(cam_in_objs).astype(np.float64), Ks[0]
+    depth_masks = (depth_masks < 1e8).astype(np.uint8) * 255
+    cam_in_objs[:, :3, 3] /= downscale
+    depths /= downscale
+    return (
+        evenly_spaced_elements(images),
+        evenly_spaced_elements(depths),
+        evenly_spaced_elements(depth_masks),
+        evenly_spaced_elements(cam_in_objs).astype(np.float64),
+        Ks[0],
+    )
 
 
 def run_neural_object_field(
@@ -202,8 +205,10 @@ def run_neural_object_field(
 if __name__ == "__main__":
     with open("bundlesdf/config_ycbv.yml", "r") as ff:
         cfg = yaml.safe_load(ff)
-    dataset_dir = 'bundlesdf/data_jim/teapot_clutter'
-    rgbs, depths, masks, cam_in_objs, K = load_data(dataset_dir)
+    dataset_dir = "bundlesdf/data_jim/car_diffuse"
+    downscale = 10
+    depth_orruption = 0.2
+    rgbs, depths, masks, cam_in_objs, K = load_data(dataset_dir, downscale)
     mesh = run_neural_object_field(
         cfg,
         K,

@@ -490,8 +490,8 @@ def get_metrics(dataset, estimated_poses, threshold_max=0.1):
 
 
 if __name__ == "__main__":
-    dataset_path = "/home/ngoncharov/LFTracking/data/jug_motion"
-    mesh_path = "/home/ngoncharov/LFTracking/data/jug_ref"
+    dataset_path = "/home/ngoncharov/LFTracking/data/box"
+    mesh_path = "/home/ngoncharov/LFTracking/data/box_ref"
     use_dam = False
 
     dataset = LFDataset(dataset_path, mesh_path, use_dam)
@@ -508,8 +508,8 @@ if __name__ == "__main__":
     pose_errors = compute_pose_errors(gt_poses, poses)
 
     pose_errors.update({"adds_auc": float(adds_auc), "add_auc": float(add_auc)})
-    with open("metrics_jug.yaml", "w") as file:
+    with open("metrics_box_new.yaml", "w") as file:
         yaml.dump(pose_errors, file, sort_keys=False)
     print(pose_errors)
-    visualize_tracking(dataset_path, poses, camera_matrix, "results_vis_jug")
+    visualize_tracking(dataset_path, poses, camera_matrix, "results_box_new")
     visualize_tracking(dataset_path, poses, camera_matrix, "results_vis_gt")
