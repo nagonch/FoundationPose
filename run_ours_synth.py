@@ -206,9 +206,10 @@ def get_frame_disparity(LF, dam_disparity, min_fit_confidence=0.9):
 
 
 class LFSynthData:
-    def __init__(self, folder, start_idx=5):
+    def __init__(self, folder, start_idx=5, end_idx=10):
         self.folder = folder
         self.start_idx = start_idx
+        self.end_idx = end_idx
         self.lf_dir = os.path.join(folder, "LF_images")
         self.cam_dir = os.path.join(folder, "Cam_params")
         self.depth_dir = os.path.join(folder, "depth")
@@ -260,7 +261,7 @@ class LFSynthData:
         self.baseline_y = cam_data["unit_baseline_y"]
 
     def __len__(self):
-        return 5
+        return self.end_idx - self.start_idx
 
     def __getitem__(self, idx):
         idx += self.start_idx
@@ -390,16 +391,18 @@ def infer_poses(model, dataset, use_dam=False):
         gt_poses.append(gt_pose)
         poses.append(pose)
 
-    pose_est_0 = poses[0]
-    pose_gt_0 = gt_poses[0]
-    est_to_gt = (
-        np.linalg.inv(pose_est_0) @ pose_gt_0
-    )  # only evaluate tracking, without pose estiamtion
-    poses = [p @ est_to_gt for p in poses]
+    # pose_est_0 = poses[0]
+    # pose_gt_0 = gt_poses[0]
+    # est_to_gt = (
+    #     np.linalg.inv(pose_est_0) @ pose_gt_0
+    # )  # only evaluate tracking, without pose estiamtion
+    # poses = [p @ est_to_gt for p in poses]
     return gt_poses, poses
 
 
-def vis_results(dataset, estimated_poses, frames_scale=0.05, apply_mask=True):
+def vis_results(
+    dataset, mesh_points, estimated_poses, frames_scale=0.05, apply_mask=True
+):
     server = viser.ViserServer()
 
     @server.on_client_connect
@@ -409,7 +412,7 @@ def vis_results(dataset, estimated_poses, frames_scale=0.05, apply_mask=True):
 
     camera_matrix = dataset.camera_matrix
     for i in range(len(dataset)):
-        image_center, depth_center, mask, object_to_cam, cam_to_world = dataset[i]
+        image_center, depth_center, mask, object_to_cam, cam_to_world, _ = dataset[i]
         # 2D vis
         vis = draw_xyz_axis(
             image_center,
@@ -436,10 +439,18 @@ def vis_results(dataset, estimated_poses, frames_scale=0.05, apply_mask=True):
             image_center, depth_center, camera_matrix, depth_thresh=0.1
         )
         pc.transform(cam_to_world)
+        mesh_pc = toOpen3dCloud(mesh_points)
+        mesh_pc.transform(object_to_cam_est)
         server.scene.add_point_cloud(
             f"my_point_cloud_{i}",
             np.array(pc.points),
             np.array(pc.colors),
+            point_size=1e-4,
+        )
+        server.scene.add_point_cloud(
+            f"mesh_pc_{i}",
+            np.array(mesh_pc.points),
+            colors=[1.0, 0.0, 0.0],
             point_size=1e-4,
         )
         server.scene.add_camera_frustum(
@@ -593,17 +604,19 @@ if __name__ == "__main__":
     dataset_path = "/home/ngoncharov/LFTracking/data/toy_car"
     mesh_path = "bundlesdf/data_jim/car_diffuse"
     use_dam = False
-    idx_start = 5
+    idx_start = 10
+    idx_end = 12
     mesh = trimesh.load(f"{mesh_path}/model.obj")
+    mesh_points = np.array(mesh.vertices.copy())
 
-    dataset = LFSynthData(dataset_path, start_idx=idx_start)
+    dataset = LFSynthData(dataset_path, start_idx=idx_start, end_idx=idx_end)
     camera_matrix = torch.tensor(dataset.camera_matrix).float()
     model = get_model()
     model = set_object(model, mesh)
     gt_poses, poses = infer_poses(model, dataset, use_dam)
 
     adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, mesh, poses)
-    # vis_results(dataset, poses, frames_scale=0.05, apply_mask=True)
+    vis_results(dataset, mesh_points, poses, frames_scale=0.05, apply_mask=True)
     gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
     poses = torch.stack([torch.tensor(p).float() for p in poses])
 
