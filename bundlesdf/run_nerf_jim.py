@@ -174,8 +174,8 @@ def load_data(dataset_dir, actual_sequence_scale=0.1):
 
     depth_masks = np.stack(depth_masks, axis=0)
     depth_masks = (depth_masks < 1e8).astype(np.uint8) * 255
-    cam_in_objs[:, :3, 3] /= scale
-    depths /= scale
+    # cam_in_objs[:, :3, 3] /= scale
+    # depths /= scale
     cam_in_objs[:, :3, 3] *= actual_sequence_scale
     depths *= actual_sequence_scale
     return (

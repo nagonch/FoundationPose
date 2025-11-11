@@ -607,6 +607,7 @@ if __name__ == "__main__":
     idx_start = 10
     idx_end = 12
     mesh = trimesh.load(f"{mesh_path}/model.obj")
+    mesh.apply_scale(1 / 0.4)  # check scale relation of the model to the sequence size
     mesh_points = np.array(mesh.vertices.copy())
 
     dataset = LFSynthData(dataset_path, start_idx=idx_start, end_idx=idx_end)
