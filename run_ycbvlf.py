@@ -119,7 +119,7 @@ def infer_poses(model, dataset):
                 gt_pose.dtype,
             )
             pose = model.register(
-                K=dataset.camera_matrix.cpu().numpy().astype(np.float32),
+                K=dataset.camera_matrix.cpu().numpy().astype(np.float64),
                 rgb=img,
                 depth=depth_image,
                 ob_mask=mask_image,
@@ -130,7 +130,7 @@ def infer_poses(model, dataset):
             pose = model.track_one(
                 rgb=img,
                 depth=depth_image,
-                K=dataset.camera_matrix.cpu(),
+                K=dataset.camera_matrix.cpu().numpy().astype(np.float64),
                 iteration=5,
             )
         gt_poses.append(gt_pose)
@@ -209,7 +209,7 @@ def vis_results(
             scale=1e-1,
             fov=np.arctan2(
                 image_center.shape[1] / 2,
-                dataset.camera_matrix[0, 0],
+                dataset.camera_matrix[0, 0].cpu().numpy(),
             )
             * 2,
             line_width=0.5,
@@ -324,13 +324,10 @@ def project_frame_to_image(object_to_cam, camera_matrix, image):
 def visualize_tracking(dataset_path, object_poses, camera_matrix, save_folder):
     os.makedirs(save_folder, exist_ok=True)
     frames = [f for f in sorted(os.listdir(f"{dataset_path}")) if "LF_" in f]
-    camera_matrix = camera_matrix.cpu().numpy()
-    for i, (frames, pose) in enumerate(zip(frames, object_poses)):
-        pose = pose.cpu().numpy()
-        all_frames = sorted(os.listdir(f"{dataset_path}/{frames}/imgs"))
-        mid_frame_path = (
-            f"{dataset_path}/{frames}/imgs/{all_frames[len(all_frames) // 2]}"
-        )
+    camera_matrix = camera_matrix.cpu().numpy().astype(np.float64)
+    for i, (frame, pose) in enumerate(zip(frames, object_poses)):
+        all_frames = sorted(os.listdir(f"{dataset_path}/{frame}"))
+        mid_frame_path = f"{dataset_path}/{frame}/{all_frames[len(all_frames) // 2]}"
         mid_frame = np.array(Image.open(mid_frame_path))
         img_vis = project_frame_to_image(pose, camera_matrix, mid_frame)
         Image.fromarray(img_vis).save(f"{save_folder}/{str(i).zfill(4)}.png")
@@ -374,10 +371,15 @@ if __name__ == "__main__":
     model = set_object(model, dataset.mesh)
 
     gt_poses, poses = infer_poses(model, dataset)
-
     visualize_tracking(
-        dataset_path,
+        f"{dataset_path}/{sequence_name}",
         gt_poses,
         camera_matrix,
-        f"/home/ngoncharov/results/{sequence_name}/gt",
+        f"results/{sequence_name}/gt",
+    )
+    visualize_tracking(
+        f"{dataset_path}/{sequence_name}",
+        gt_poses,
+        camera_matrix,
+        f"results/{sequence_name}/est",
     )
