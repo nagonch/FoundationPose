@@ -3,6 +3,7 @@ import os
 import json
 import numpy as np
 from PIL import Image
+import trimesh
 
 sequence_names = [
     "bleach_hard_00_03_chaitanya",
@@ -45,6 +46,10 @@ class YCBV_LF:
         assert os.path.exists(
             os.path.join(dataset_path, "models", self.model_name)
         ), f"Model {self.model_name} does not exist in dataset path {dataset_path}"
+
+        self.mesh = trimesh.load(
+            f"{dataset_path}/models/{self.model_name}/textured.obj"
+        )
 
         self.camera_poses_paths = [
             os.path.join(self.sequence_path, "camera_poses", item)
@@ -107,8 +112,6 @@ class YCBV_LF:
             Image.open(f"{lf_path}/masks/{self.n_cameras//2:04d}.png")
         ).astype(np.uint8)
         depth_image = np.array(Image.open(depth_path), dtype=np.uint16)
-        # depth_image = depth_image.astype(np.float32) / 1000.0
-        # depth_image[depth_image == 0] = np.inf
         object_pose = np.loadtxt(object_pose_path)
         return {
             "rgb_image": rgb_image,
