@@ -80,6 +80,7 @@ class YCBV_LF:
             .cuda()
             .float()
         )
+        # self.camera_matrix = self.camera_matrix
 
         self.depth_dir = os.path.join(self.sequence_path, "depth")
         self.depth_paths = [
@@ -111,13 +112,13 @@ class YCBV_LF:
         object_mask = np.array(
             Image.open(f"{lf_path}/masks/{self.n_cameras//2:04d}.png")
         ).astype(np.uint8)
-        depth_image = np.array(Image.open(depth_path), dtype=np.uint16)
+        depth_image = np.array(Image.open(depth_path), dtype=np.float32) / 1000.0
         object_pose = np.loadtxt(object_pose_path)
         return {
             "rgb_image": rgb_image,
             "object_mask": object_mask,
             "depth_image": depth_image,
-            "object_pose": object_pose,
+            "object_pose": object_pose.astype(np.float32),
             "frame_id": frame_id,
         }
 
