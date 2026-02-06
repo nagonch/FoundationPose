@@ -361,8 +361,12 @@ if __name__ == "__main__":
         if folder_name in ["models", "ref_views"]:
             continue
         sequence_name = folder_name
-        out_folder = f"output/{sequence_name}"
-
+        out_folder = f"results/{sequence_name}"
+        try:
+            os.makedirs(out_folder)
+        except FileExistsError:
+            print(f"Skipping {sequence_name}, already exists.")
+            continue
         dataset = YCBV_LF(
             dataset_path, sequence_name, reference_mesh_path="bundlesdf/output"
         )

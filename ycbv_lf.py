@@ -15,7 +15,7 @@ sequence_names = [
     "mustard0",
     "sugar_box_yalehand0",
     "sugar_box1",
-    "tomato_soup_can_yalehand",
+    "tomato_soup_can_yalehand0",
 ]
 model_names = [
     "021_bleach_cleanser",
