@@ -356,43 +356,47 @@ def get_metrics(dataset, estimated_poses, threshold_max=0.1):
 
 if __name__ == "__main__":
     dataset_path = "/home/ngoncharov/cvpr2026/ycbv-eoat-lf/dataset"
-    sequence_name = "bleach_hard_00_03_chaitanya"
-    out_folder = f"output/{sequence_name}"
+    folder_names = os.listdir(dataset_path)
+    for folder_name in folder_names:
+        if folder_name in ["models", "ref_views"]:
+            continue
+        sequence_name = folder_name
+        out_folder = f"output/{sequence_name}"
 
-    dataset = YCBV_LF(
-        dataset_path, sequence_name, reference_mesh_path="bundlesdf/output"
-    )
-    camera_matrix = torch.tensor(dataset.camera_matrix).float()
-    gt_poses = [dataset[i]["object_pose"] for i in range(len(dataset))]
-    gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
+        dataset = YCBV_LF(
+            dataset_path, sequence_name, reference_mesh_path="bundlesdf/output"
+        )
+        camera_matrix = torch.tensor(dataset.camera_matrix).float()
+        gt_poses = [dataset[i]["object_pose"] for i in range(len(dataset))]
+        gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
 
-    model = get_model()
-    model = set_object(model, dataset.mesh)
+        model = get_model()
+        model = set_object(model, dataset.mesh)
 
-    gt_poses, poses = infer_poses(model, dataset)
-    adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
+        gt_poses, poses = infer_poses(model, dataset)
+        adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
 
-    gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
-    poses = torch.stack([torch.tensor(p).float() for p in poses])
+        gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
+        poses = torch.stack([torch.tensor(p).float() for p in poses])
 
-    pose_errors = compute_pose_errors(gt_poses, poses)
-    pose_errors.update({"adds_auc": float(adds_auc), "add_auc": float(add_auc)})
+        pose_errors = compute_pose_errors(gt_poses, poses)
+        pose_errors.update({"adds_auc": float(adds_auc), "add_auc": float(add_auc)})
 
-    with open(f"results/{sequence_name}/metrics.yaml", "w") as file:
-        yaml.dump(pose_errors, file, sort_keys=False)
+        with open(f"results/{sequence_name}/metrics.yaml", "w") as file:
+            yaml.dump(pose_errors, file, sort_keys=False)
 
-    gt_poses = gt_poses.cpu().numpy()
-    poses = poses.cpu().numpy()
+        gt_poses = gt_poses.cpu().numpy()
+        poses = poses.cpu().numpy()
 
-    visualize_tracking(
-        f"{dataset_path}/{sequence_name}",
-        gt_poses,
-        camera_matrix,
-        f"results/{sequence_name}/gt",
-    )
-    visualize_tracking(
-        f"{dataset_path}/{sequence_name}",
-        poses,
-        camera_matrix,
-        f"results/{sequence_name}/est",
-    )
+        visualize_tracking(
+            f"{dataset_path}/{sequence_name}",
+            gt_poses,
+            camera_matrix,
+            f"results/{sequence_name}/gt",
+        )
+        visualize_tracking(
+            f"{dataset_path}/{sequence_name}",
+            poses,
+            camera_matrix,
+            f"results/{sequence_name}/est",
+        )
