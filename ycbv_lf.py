@@ -20,13 +20,13 @@ sequence_names = [
 model_names = [
     "021_bleach_cleanser",
     "021_bleach_cleanser",
-    "024_cracker_box",
-    "024_cracker_box",
-    "037_mustard_bottle",
-    "037_mustard_bottle",
-    "035_sugar_box",
-    "035_sugar_box",
-    "048_tomato_soup_can",
+    "003_cracker_box",
+    "003_cracker_box",
+    "006_mustard_bottle",
+    "006_mustard_bottle",
+    "004_sugar_box",
+    "004_sugar_box",
+    "005_tomato_soup_can",
 ]
 
 sequence_to_model = {seq: model for seq, model in zip(sequence_names, model_names)}
