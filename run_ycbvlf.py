@@ -263,6 +263,7 @@ def compute_pose_errors(gt_poses, est_poses):
     R_err_abs = R_est @ R_gt.transpose(-1, -2)  # (N, 3, 3)
     rot_err_abs = rotation_angle_deg(R_err_abs)  # (N,)
     trans_err_abs = torch.norm(t_est - t_gt, dim=1)  # (N,)
+    ate_rmse = torch.sqrt((trans_err_abs**2).mean())
 
     # Relative errors
     rel_rot_errs = []
@@ -288,6 +289,7 @@ def compute_pose_errors(gt_poses, est_poses):
         "mean_abs_trans": trans_err_abs.mean().item(),
         "mean_rel_rot_deg": rel_rot_errs.mean().item(),
         "mean_rel_trans": rel_trans_errs.mean().item(),
+        "ate_rmse": ate_rmse.item(),
     }
 
 
