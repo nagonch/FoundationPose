@@ -357,12 +357,11 @@ def get_metrics(dataset, estimated_poses, threshold_max=0.1):
 if __name__ == "__main__":
     dataset_path = "/home/ngoncharov/cvpr2026/ycbv-eoat-lf/dataset"
     sequence_name = "bleach_hard_00_03_chaitanya"
-    mesh_name = "021_bleach_cleanser"
-    mesh_path = f"{dataset_path}/models/{mesh_name}"
-    mesh_file_path = f"{mesh_path}/textured.obj"
     out_folder = f"output/{sequence_name}"
 
-    dataset = YCBV_LF(dataset_path, sequence_name)
+    dataset = YCBV_LF(
+        dataset_path, sequence_name, reference_mesh_path="bundlesdf/output"
+    )
     camera_matrix = torch.tensor(dataset.camera_matrix).float()
     gt_poses = [dataset[i]["object_pose"] for i in range(len(dataset))]
     gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])

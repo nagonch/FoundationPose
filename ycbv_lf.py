@@ -52,7 +52,9 @@ class YCBV_LF:
             f"{dataset_path}/models/{self.model_name}/textured.obj"
         )
         if reference_mesh_path is not None:
-            self.mesh = trimesh.load(reference_mesh_path)
+            self.mesh = trimesh.load(
+                f"{reference_mesh_path}/{self.model_name[4:]}/model.obj"
+            )
         else:
             self.mesh = copy.deepcopy(self.gt_mesh)
 

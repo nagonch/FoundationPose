@@ -128,7 +128,7 @@ if __name__ == "__main__":
     with open("config_ycbv.yml", "r") as ff:
         cfg = yaml.safe_load(ff)
     ref_views_path = "/home/ngoncharov/cvpr2026/ycbv-eoat-lf/dataset/ref_views"
-    object_name = "bleach_clenser"
+    object_name = "tomato_soup"
     object_path = f"{ref_views_path}/{object_name}"
 
     rgbs, depths, masks, cam_in_objs, K = load_all(object_path)
