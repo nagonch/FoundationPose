@@ -33,7 +33,7 @@ sequence_to_model = {seq: model for seq, model in zip(sequence_names, model_name
 
 
 class YCBV_LF:
-    def __init__(self, dataset_path, sequence_name):
+    def __init__(self, dataset_path, sequence_name, reference_mesh_path=None):
         assert os.path.exists(
             dataset_path
         ), f"Dataset path {dataset_path} does not exist."
@@ -51,7 +51,10 @@ class YCBV_LF:
         self.gt_mesh = trimesh.load(
             f"{dataset_path}/models/{self.model_name}/textured.obj"
         )
-        self.mesh = copy.deepcopy(self.gt_mesh)
+        if reference_mesh_path is not None:
+            self.mesh = trimesh.load(reference_mesh_path)
+        else:
+            self.mesh = copy.deepcopy(self.gt_mesh)
 
         self.camera_poses_paths = [
             os.path.join(self.sequence_path, "camera_poses", item)
