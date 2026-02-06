@@ -4,6 +4,7 @@ import json
 import numpy as np
 from PIL import Image
 import trimesh
+import copy
 
 sequence_names = [
     "bleach_hard_00_03_chaitanya",
@@ -47,9 +48,10 @@ class YCBV_LF:
             os.path.join(dataset_path, "models", self.model_name)
         ), f"Model {self.model_name} does not exist in dataset path {dataset_path}"
 
-        self.mesh = trimesh.load(
+        self.gt_mesh = trimesh.load(
             f"{dataset_path}/models/{self.model_name}/textured.obj"
         )
+        self.mesh = copy.deepcopy(self.gt_mesh)
 
         self.camera_poses_paths = [
             os.path.join(self.sequence_path, "camera_poses", item)

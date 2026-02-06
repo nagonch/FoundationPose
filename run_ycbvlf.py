@@ -335,7 +335,7 @@ def visualize_tracking(dataset_path, object_poses, camera_matrix, save_folder):
 
 def get_metrics(dataset, estimated_poses, threshold_max=0.1):
     thresholds_space = np.linspace(0, threshold_max, 100)
-    gt_pc = dataset.mesh.vertices.copy()
+    gt_pc = dataset.gt_mesh.vertices.copy()
     adds_vals = []
     add_vals = []
     for i in range(len(dataset)):
