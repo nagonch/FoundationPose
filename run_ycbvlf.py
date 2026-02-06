@@ -370,6 +370,20 @@ if __name__ == "__main__":
     model = set_object(model, dataset.mesh)
 
     gt_poses, poses = infer_poses(model, dataset)
+    adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
+
+    gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
+    poses = torch.stack([torch.tensor(p).float() for p in poses])
+
+    pose_errors = compute_pose_errors(gt_poses, poses)
+    pose_errors.update({"adds_auc": float(adds_auc), "add_auc": float(add_auc)})
+
+    with open(f"results/{sequence_name}/metrics.yaml", "w") as file:
+        yaml.dump(pose_errors, file, sort_keys=False)
+
+    gt_poses = gt_poses.cpu().numpy()
+    poses = poses.cpu().numpy()
+
     visualize_tracking(
         f"{dataset_path}/{sequence_name}",
         gt_poses,
@@ -378,7 +392,7 @@ if __name__ == "__main__":
     )
     visualize_tracking(
         f"{dataset_path}/{sequence_name}",
-        gt_poses,
+        poses,
         camera_matrix,
         f"results/{sequence_name}/est",
     )
