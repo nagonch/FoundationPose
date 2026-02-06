@@ -123,6 +123,8 @@ def run_neural_object_field(
 
 
 if __name__ == "__main__":
+    import os
+
     with open("config_ycbv.yml", "r") as ff:
         cfg = yaml.safe_load(ff)
     ref_views_path = "/home/ngoncharov/cvpr2026/ycbv-eoat-lf/dataset/ref_views"
