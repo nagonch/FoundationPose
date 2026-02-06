@@ -130,7 +130,6 @@ if __name__ == "__main__":
     object_path = f"{ref_views_path}/{object_name}"
 
     rgbs, depths, masks, cam_in_objs, K = load_all(object_path)
-    raise
     mesh = run_neural_object_field(
         cfg,
         K,
@@ -138,8 +137,8 @@ if __name__ == "__main__":
         depths,
         masks,
         cam_in_objs,
-        save_dir=dataset_dir + "/mesh",
+        save_dir=f"output/{object_name}/mesh",
     )
-    out_file = f"{dataset_dir}/model.obj"
+    out_file = f"output/{object_name}/model.obj"
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
     mesh.export(out_file)
