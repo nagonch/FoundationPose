@@ -114,7 +114,7 @@ class YCBV_EOAT:
         frame_id = int(rgb_path.split("/")[-1].split(".")[0])
 
         rgb_image = np.array(Image.open(rgb_path)).astype(np.uint8)
-        object_mask = np.array(Image.open(mask_path)).astype(np.uint8)
+        object_mask = (np.array(Image.open(mask_path)) * 255.0).astype(np.uint8)
         depth_image = np.array(Image.open(depth_path), dtype=np.float32) / 1000.0
         object_pose = np.loadtxt(object_pose_path)
         return {
@@ -416,14 +416,12 @@ def project_frame_to_image(object_to_cam, camera_matrix, image):
     return img_vis
 
 
-def visualize_tracking(dataset_path, object_poses, camera_matrix, save_folder):
+def visualize_tracking(dataset, object_poses, camera_matrix, save_folder):
+    rgb_paths = dataset.rgb_paths
     os.makedirs(save_folder, exist_ok=True)
-    frames = [f for f in sorted(os.listdir(f"{dataset_path}")) if "LF_" in f]
     camera_matrix = camera_matrix.cpu().numpy().astype(np.float64)
-    for i, (frame, pose) in enumerate(zip(frames, object_poses)):
-        all_frames = sorted(os.listdir(f"{dataset_path}/{frame}"))
-        mid_frame_path = f"{dataset_path}/{frame}/{all_frames[len(all_frames) // 2]}"
-        mid_frame = np.array(Image.open(mid_frame_path))
+    for i, (frame, pose) in enumerate(zip(rgb_paths, object_poses)):
+        mid_frame = np.array(Image.open(frame))
         img_vis = project_frame_to_image(pose, camera_matrix, mid_frame)
         Image.fromarray(img_vis).save(f"{save_folder}/{str(i).zfill(4)}.png")
 
@@ -452,7 +450,7 @@ def get_metrics(dataset, estimated_poses, threshold_max=0.1):
 if __name__ == "__main__":
     dataset_path = "/home/ngoncharov/cvpr2026/datasets/ycb_in_eoat"
     keyframe_dataset_path = "/home/ngoncharov/cvpr2026/ycbv-eoat-lf/dataset"
-    use_keyframes = True
+    use_keyframes = False
 
     save_dir = "results_ycb_in_eoat"
     if use_keyframes:
@@ -460,53 +458,57 @@ if __name__ == "__main__":
     folder_names = os.listdir(dataset_path)
 
     for folder_name in folder_names:
-        if folder_name in ["models", "ref_views", "download.sh"]:
+        if folder_name in ["models", "ref_views", "download_ycbv.sh"]:
             continue
+        print("RUNNING ON SEQUENCE ", folder_name)
         sequence_name = folder_name
         out_folder = f"{save_dir}/{sequence_name}"
-        # try:
-        #     os.makedirs(out_folder)
-        # except FileExistsError:
-        #     print(f"Skipping {sequence_name}, already exists.")
-        #     continue
-        dataset = YCBV_EOAT(
-            dataset_path,
-            sequence_name,
-            reference_mesh_path="bundlesdf/output",
-            keyframes_only=use_keyframes,
-            key_frames_dataset_path=keyframe_dataset_path,
-        )
-        camera_matrix = torch.tensor(dataset.camera_matrix).float()
-        gt_poses = [dataset[i]["object_pose"] for i in range(len(dataset))]
-        gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
+        try:
+            os.makedirs(out_folder)
+        except FileExistsError:
+            print(f"Skipping {sequence_name}, already exists.")
+            continue
+        try:
+            dataset = YCBV_EOAT(
+                dataset_path,
+                sequence_name,
+                reference_mesh_path="bundlesdf/output",
+                keyframes_only=use_keyframes,
+                key_frames_dataset_path=keyframe_dataset_path,
+            )
+            camera_matrix = torch.tensor(dataset.camera_matrix).float()
+            gt_poses = [dataset[i]["object_pose"] for i in range(len(dataset))]
+            gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
 
-        model = get_model()
-        model = set_object(model, dataset.mesh)
+            model = get_model()
+            model = set_object(model, dataset.mesh)
 
-        gt_poses, poses = infer_poses(model, dataset)
-        adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
+            gt_poses, poses = infer_poses(model, dataset)
+            adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
 
-        gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
-        poses = torch.stack([torch.tensor(p).float() for p in poses])
+            gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
+            poses = torch.stack([torch.tensor(p).float() for p in poses])
 
-        pose_errors = compute_pose_errors(gt_poses, poses)
-        pose_errors.update({"adds_auc": float(adds_auc), "add_auc": float(add_auc)})
+            pose_errors = compute_pose_errors(gt_poses, poses)
+            pose_errors.update({"adds_auc": float(adds_auc), "add_auc": float(add_auc)})
 
-        with open(f"{save_dir}/{sequence_name}/metrics.yaml", "w") as file:
-            yaml.dump(pose_errors, file, sort_keys=False)
+            with open(f"{save_dir}/{sequence_name}/metrics.yaml", "w") as file:
+                yaml.dump(pose_errors, file, sort_keys=False)
 
-        gt_poses = gt_poses.cpu().numpy()
-        poses = poses.cpu().numpy()
-
-        visualize_tracking(
-            f"{dataset_path}/{sequence_name}",
-            gt_poses,
-            camera_matrix,
-            f"{save_dir}/{sequence_name}/gt",
-        )
-        visualize_tracking(
-            f"{dataset_path}/{sequence_name}",
-            poses,
-            camera_matrix,
-            f"{save_dir}/{sequence_name}/est",
-        )
+            gt_poses = gt_poses.cpu().numpy()
+            poses = poses.cpu().numpy()
+            visualize_tracking(
+                dataset,
+                gt_poses,
+                camera_matrix,
+                f"{save_dir}/{sequence_name}/gt",
+            )
+            visualize_tracking(
+                dataset,
+                poses,
+                camera_matrix,
+                f"{save_dir}/{sequence_name}/est",
+            )
+        except Exception as e:
+            print(f"Error processing sequence {sequence_name}")
+            continue
