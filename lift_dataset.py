@@ -47,7 +47,7 @@ class LIFT_DATASET:
 
         if reference_mesh_path is not None:
             self.mesh = trimesh.load(
-                f"{reference_mesh_path}/{self.model_name}/model.obj"
+                f"{reference_mesh_path}/{self.model_name.strip('_ref_prod')}/model.obj"
             )
             self.gt_mesh = copy.deepcopy(self.mesh)
 
@@ -113,12 +113,13 @@ class LIFT_DATASET:
             Image.open(f"{lf_path}/masks/{self.n_cameras//2:04d}.png")
         ).astype(np.uint8)
         depth_image = np.array(Image.open(depth_path), dtype=np.float32) / 1000.0
-        object_pose = np.loadtxt(object_pose_path)
+        object_to_world = np.loadtxt(object_pose_path)
+        object_to_cam = np.linalg.inv(self.camera_poses) @ object_to_world
         return {
             "rgb_image": rgb_image,
             "object_mask": object_mask,
             "depth_image": depth_image,
-            "object_pose": object_pose.astype(np.float32),
+            "object_pose": object_to_cam.astype(np.float32),
             "frame_id": frame_id,
         }
 

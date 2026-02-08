@@ -132,19 +132,19 @@ if __name__ == "__main__":
     with open("config_ycbv.yml", "r") as ff:
         cfg = yaml.safe_load(ff)
     ref_views_path = "/home/ngoncharov/cvpr2026/datasets/LiFT_dataset/prod_ref"
-    object_name = "teabox"
-    object_path = f"{ref_views_path}/{object_name}_ref_prod"
+    for object_name in os.listdir(ref_views_path):
+        object_path = f"{ref_views_path}/{object_name}"
 
-    rgbs, depths, masks, cam_in_objs, K = load_all(object_path)
-    mesh = run_neural_object_field(
-        cfg,
-        K,
-        rgbs,
-        depths,
-        masks,
-        cam_in_objs,
-        save_dir=f"output_lift/{object_name}/mesh",
-    )
-    out_file = f"output_lift/{object_name}/model.obj"
-    os.makedirs(os.path.dirname(out_file), exist_ok=True)
-    mesh.export(out_file)
+        rgbs, depths, masks, cam_in_objs, K = load_all(object_path)
+        mesh = run_neural_object_field(
+            cfg,
+            K,
+            rgbs,
+            depths,
+            masks,
+            cam_in_objs,
+            save_dir=f"output_lift/{object_name}/mesh",
+        )
+        out_file = f"output_lift/{object_name}/model.obj"
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
+        mesh.export(out_file)
