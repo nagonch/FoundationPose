@@ -24,7 +24,7 @@ model_names = [
     "jug_ref_prod",
     "jug_ref_prod",
     "jug_ref_prod",
-    "shiny_box_ref",
+    "shiny_box_ref_prod",
     "teabox_ref_prod",
     "teabox_ref_prod",
 ]
@@ -47,7 +47,7 @@ class LIFT_DATASET:
 
         if reference_mesh_path is not None:
             self.mesh = trimesh.load(
-                f"{reference_mesh_path}/{self.model_name.strip('_ref_prod')}/model.obj"
+                f"{reference_mesh_path}/{self.model_name}/model.obj"
             )
             self.gt_mesh = copy.deepcopy(self.mesh)
 
