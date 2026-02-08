@@ -35,9 +35,13 @@ def load_all(object_path):
         mask = Image.open(f"{object_path}/masks/{filename:04d}.png")
         mask = np.array(mask).astype(np.uint8)
         masks.append(mask)
-        obj_in_cam = np.loadtxt(
+        cam_in_world = np.loadtxt(f"{object_path}/cam_poses/{filename:04d}.txt").astype(
+            np.float32
+        )
+        obj_in_world = np.loadtxt(
             f"{object_path}/object_poses/{filename:04d}.txt"
         ).astype(np.float32)
+        obj_in_cam = np.linalg.inv(cam_in_world) @ obj_in_world
         cam_in_obj_gl = np.linalg.inv(obj_in_cam) @ glcam_in_cvcam
         cam_in_objs.append(cam_in_obj_gl)
     rgbs = np.stack(rgbs, axis=0)
