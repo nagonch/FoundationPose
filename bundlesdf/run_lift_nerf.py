@@ -132,7 +132,7 @@ if __name__ == "__main__":
     with open("config_ycbv.yml", "r") as ff:
         cfg = yaml.safe_load(ff)
     ref_views_path = "/home/ngoncharov/cvpr2026/datasets/LiFT_dataset/prod_ref"
-    object_name = "box"
+    object_name = "teabox"
     object_path = f"{ref_views_path}/{object_name}_ref_prod"
 
     rgbs, depths, masks, cam_in_objs, K = load_all(object_path)
