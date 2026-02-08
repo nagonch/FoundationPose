@@ -113,7 +113,7 @@ class YCBV_EOAT:
         object_pose_path = self.object_poses_paths[idx]
         frame_id = int(rgb_path.split("/")[-1].split(".")[0])
 
-        rgb_image = np.array(Image.open(rgb_path)).astype(np.uint8)
+        rgb_image = np.array(Image.open(rgb_path).convert("RGB")).astype(np.uint8)
         object_mask = (np.array(Image.open(mask_path)) * 255.0).astype(np.uint8)
         depth_image = np.array(Image.open(depth_path), dtype=np.float32) / 1000.0
         object_pose = np.loadtxt(object_pose_path)
@@ -421,7 +421,7 @@ def visualize_tracking(dataset, object_poses, camera_matrix, save_folder):
     os.makedirs(save_folder, exist_ok=True)
     camera_matrix = camera_matrix.cpu().numpy().astype(np.float64)
     for i, (frame, pose) in enumerate(zip(rgb_paths, object_poses)):
-        mid_frame = np.array(Image.open(frame))
+        mid_frame = np.array(Image.open(frame).convert("RGB"))
         img_vis = project_frame_to_image(pose, camera_matrix, mid_frame)
         Image.fromarray(img_vis).save(f"{save_folder}/{str(i).zfill(4)}.png")
 
@@ -468,47 +468,42 @@ if __name__ == "__main__":
         except FileExistsError:
             print(f"Skipping {sequence_name}, already exists.")
             continue
-        try:
-            dataset = YCBV_EOAT(
-                dataset_path,
-                sequence_name,
-                reference_mesh_path="bundlesdf/output",
-                keyframes_only=use_keyframes,
-                key_frames_dataset_path=keyframe_dataset_path,
-            )
-            camera_matrix = torch.tensor(dataset.camera_matrix).float()
-            gt_poses = [dataset[i]["object_pose"] for i in range(len(dataset))]
-            gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
+        dataset = YCBV_EOAT(
+            dataset_path,
+            sequence_name,
+            reference_mesh_path="bundlesdf/output",
+            keyframes_only=use_keyframes,
+            key_frames_dataset_path=keyframe_dataset_path,
+        )
+        camera_matrix = torch.tensor(dataset.camera_matrix).float()
+        gt_poses = [dataset[i]["object_pose"] for i in range(len(dataset))]
+        gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
 
-            model = get_model()
-            model = set_object(model, dataset.mesh)
+        model = get_model()
+        model = set_object(model, dataset.mesh)
+        gt_poses, poses = infer_poses(model, dataset)
+        adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
 
-            gt_poses, poses = infer_poses(model, dataset)
-            adds_vals, add_vals, adds_auc, add_auc = get_metrics(dataset, poses)
+        gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
+        poses = torch.stack([torch.tensor(p).float() for p in poses])
 
-            gt_poses = torch.stack([torch.tensor(p).float() for p in gt_poses])
-            poses = torch.stack([torch.tensor(p).float() for p in poses])
+        pose_errors = compute_pose_errors(gt_poses, poses)
+        pose_errors.update({"adds_auc": float(adds_auc), "add_auc": float(add_auc)})
 
-            pose_errors = compute_pose_errors(gt_poses, poses)
-            pose_errors.update({"adds_auc": float(adds_auc), "add_auc": float(add_auc)})
+        with open(f"{save_dir}/{sequence_name}/metrics.yaml", "w") as file:
+            yaml.dump(pose_errors, file, sort_keys=False)
 
-            with open(f"{save_dir}/{sequence_name}/metrics.yaml", "w") as file:
-                yaml.dump(pose_errors, file, sort_keys=False)
-
-            gt_poses = gt_poses.cpu().numpy()
-            poses = poses.cpu().numpy()
-            visualize_tracking(
-                dataset,
-                gt_poses,
-                camera_matrix,
-                f"{save_dir}/{sequence_name}/gt",
-            )
-            visualize_tracking(
-                dataset,
-                poses,
-                camera_matrix,
-                f"{save_dir}/{sequence_name}/est",
-            )
-        except Exception as e:
-            print(f"Error processing sequence {sequence_name}")
-            continue
+        gt_poses = gt_poses.cpu().numpy()
+        poses = poses.cpu().numpy()
+        visualize_tracking(
+            dataset,
+            gt_poses,
+            camera_matrix,
+            f"{save_dir}/{sequence_name}/gt",
+        )
+        visualize_tracking(
+            dataset,
+            poses,
+            camera_matrix,
+            f"{save_dir}/{sequence_name}/est",
+        )
