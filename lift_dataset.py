@@ -49,6 +49,7 @@ class LIFT_DATASET:
             self.mesh = trimesh.load(
                 f"{reference_mesh_path}/{self.model_name}/model.obj"
             )
+            self.gt_mesh = copy.deepcopy(self.mesh)
 
         self.camera_poses_paths = [
             os.path.join(self.sequence_path, "camera_poses", item)
