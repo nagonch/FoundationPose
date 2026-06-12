@@ -1,8 +1,9 @@
 import os
 import sys
+import shutil
+import traceback
 import numpy as np
 import yaml as pyyaml
-import argparse
 from PIL import Image
 from nerf_runner import *
 
@@ -11,6 +12,14 @@ sys.path.append(f"{code_dir}/../")
 from datareader import *
 from bundlesdf.tool import *
 
+OBJECTS = [
+    "bleach_cleanser",
+    "cracker_box",
+    "cube",
+    "mustard_bottle",
+    "sugar_box",
+    "tomato_soup_can",
+]
 VALID_REFLECTIVITIES = ["0.0", "0.5", "0.7", "1.0"]
 VALID_DEPTH_TYPES = ["gt", "sim"]
 REF_VIEWS_PATH = "/home/ngoncharov/SpecTrack_dataset/reference_views"
@@ -121,45 +130,54 @@ def run_neural_object_field(cfg, K, rgbs, depths, masks, cam_in_obs, save_dir):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--object", required=True, help="Object name (e.g. tomato_soup_can)"
-    )
-    parser.add_argument(
-        "--reflectivity",
-        required=True,
-        choices=VALID_REFLECTIVITIES,
-        help="Reflectivity level: 0.0, 0.5, 0.7, or 1.0",
-    )
-    parser.add_argument(
-        "--depth_type",
-        required=True,
-        choices=VALID_DEPTH_TYPES,
-        help="Depth source: gt or sim",
-    )
-    args = parser.parse_args()
-
-    object_path = f"{REF_VIEWS_PATH}/{args.object}_{args.reflectivity}"
-    if not os.path.isdir(object_path):
-        raise FileNotFoundError(f"Object folder not found: {object_path}")
-
     with open("config_ycbv.yml", "r") as ff:
-        cfg = pyyaml.safe_load(ff)
+        cfg_base = pyyaml.safe_load(ff)
 
-    rgbs, depths, masks, cam_in_objs, K = load_all(object_path, args.depth_type)
+    jobs = [
+        (obj, refl, depth)
+        for obj in OBJECTS
+        for refl in VALID_REFLECTIVITIES
+        for depth in VALID_DEPTH_TYPES
+    ]
+    total = len(jobs)
+    failed = []
 
-    tag = f"{args.object}_r{args.reflectivity}_d{args.depth_type}"
-    mesh = run_neural_object_field(
-        cfg,
-        K,
-        rgbs,
-        depths,
-        masks,
-        cam_in_objs,
-        save_dir=f"output/{tag}/mesh",
-    )
+    for idx, (obj, refl, depth) in enumerate(jobs, 1):
+        tag = f"{obj}_r{refl}_d{depth}"
+        out_file = f"output/{tag}/model.obj"
 
-    out_file = f"output/{tag}/model.obj"
-    os.makedirs(os.path.dirname(out_file), exist_ok=True)
-    mesh.export(out_file)
-    print(f"Saved mesh to {out_file}")
+        if os.path.isfile(out_file):
+            print(f"[{idx}/{total}] SKIP {tag} — already done")
+            continue
+
+        object_path = f"{REF_VIEWS_PATH}/{obj}_{refl}"
+        if not os.path.isdir(object_path):
+            print(f"[{idx}/{total}] SKIP {tag} — folder not found: {object_path}")
+            continue
+
+        print(f"\n[{idx}/{total}] START {tag}")
+        save_dir = f"output/{tag}/mesh"
+        try:
+            cfg = dict(cfg_base)
+            print(f"  loading data from {object_path} (depth_{depth})")
+            rgbs, depths, masks, cam_in_objs, K = load_all(object_path, depth)
+            print(f"  loaded {len(rgbs)} frames — running NeRF")
+            mesh = run_neural_object_field(
+                cfg, K, rgbs, depths, masks, cam_in_objs, save_dir=save_dir
+            )
+            os.makedirs(os.path.dirname(out_file), exist_ok=True)
+            mesh.export(out_file)
+            print(f"[{idx}/{total}] DONE {tag} -> {out_file}")
+        except Exception:
+            print(f"[{idx}/{total}] FAILED {tag}")
+            traceback.print_exc()
+            if os.path.isdir(f"output/{tag}"):
+                print(f"  deleting partial output: output/{tag}")
+                shutil.rmtree(f"output/{tag}")
+            failed.append(tag)
+
+    print(f"\n=== Finished {total - len(failed)}/{total} jobs ===")
+    if failed:
+        print("Failed:")
+        for tag in failed:
+            print(f"  {tag}")
