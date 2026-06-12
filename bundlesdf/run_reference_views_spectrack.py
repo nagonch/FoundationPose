@@ -41,9 +41,10 @@ def load_all(object_path, depth_type):
         mask = np.array(Image.open(f"{object_path}/mask/{stem}.png")).astype(np.uint8)
         masks.append(mask)
 
-        cam_in_obj = np.loadtxt(f"{object_path}/camera_poses/{stem}.txt").astype(
+        ob_in_cam = np.loadtxt(f"{object_path}/camera_poses/{stem}.txt").astype(
             np.float32
         )
+        cam_in_obj = np.linalg.inv(ob_in_cam)
         cam_in_objs.append(cam_in_obj @ glcam_in_cvcam)
 
     rgbs = np.stack(rgbs, axis=0)
