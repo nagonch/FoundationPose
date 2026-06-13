@@ -6,6 +6,18 @@ from PIL import Image
 import trimesh
 import copy
 
+PROD_SEQUENCE_TO_OBJECT = {
+    "bleach0": "bleach_cleanser",
+    "bleach_hard_00_03_chaitanya": "bleach_cleanser",
+    "cracker_box_reorient": "cracker_box",
+    "cracker_box_yalehand0": "cracker_box",
+    "mustard0": "mustard_bottle",
+    "mustard_easy_00_02": "mustard_bottle",
+    "sugar_box1": "sugar_box",
+    "sugar_box_yalehand0": "sugar_box",
+    "tomato_soup_can_yalehand0": "tomato_soup_can",
+}
+
 sequence_names = [
     "bleach_hard_00_03_chaitanya",
     "bleach0",
@@ -118,6 +130,73 @@ class YCBV_LF:
         ).astype(np.uint8)
         object_mask = np.array(
             Image.open(f"{lf_path}/masks/{self.n_cameras//2:04d}.png")
+        ).astype(np.uint8)
+        depth_image = np.array(Image.open(depth_path), dtype=np.float32) / 1000.0
+        object_pose = np.loadtxt(object_pose_path)
+        return {
+            "rgb_image": rgb_image,
+            "object_mask": object_mask,
+            "depth_image": depth_image,
+            "object_pose": object_pose.astype(np.float32),
+            "frame_id": frame_id,
+        }
+
+
+class YCBV_LF_Prod:
+    """Dataset class for prod_dataset_new sequences."""
+
+    def __init__(self, sequence_path: str, mesh_path: str, depth_mode: str = "gt"):
+        assert os.path.exists(sequence_path), f"Sequence path {sequence_path} does not exist."
+        assert depth_mode in ("gt", "synth"), "depth_mode must be 'gt' or 'synth'"
+
+        self.sequence_path = sequence_path
+        self.depth_mode = depth_mode
+
+        self.mesh = trimesh.load(mesh_path)
+
+        with open(os.path.join(sequence_path, "metadata.json"), "r") as f:
+            metadata = json.load(f)
+            self.n_views = metadata["n_views"]
+        self.n_cameras = self.n_views[0] * self.n_views[1]
+
+        self.camera_matrix = (
+            torch.tensor(np.loadtxt(os.path.join(sequence_path, "camera_matrix.txt")))
+            .cuda()
+            .float()
+        )
+
+        depth_dir = os.path.join(
+            sequence_path, "depth" if depth_mode == "gt" else "depth_synth"
+        )
+        self.depth_paths = [
+            os.path.join(depth_dir, item)
+            for item in sorted(os.listdir(depth_dir))
+        ]
+
+        object_poses_dir = os.path.join(sequence_path, "object_poses")
+        self.object_poses_paths = [
+            os.path.join(object_poses_dir, item)
+            for item in sorted(os.listdir(object_poses_dir))
+        ]
+
+        self.lf_paths = [
+            os.path.join(sequence_path, item)
+            for item in sorted(os.listdir(sequence_path))
+            if "LF_" in item
+        ]
+
+    def __len__(self):
+        return len(self.lf_paths)
+
+    def __getitem__(self, idx):
+        lf_path = self.lf_paths[idx]
+        depth_path = self.depth_paths[idx]
+        object_pose_path = self.object_poses_paths[idx]
+        frame_id = int(lf_path[-4:])
+        center_idx = self.n_cameras // 2
+        rgb_image = np.array(Image.open(f"{lf_path}/{center_idx:04d}.png")).astype(np.uint8)
+        object_mask = np.array(
+            Image.open(f"{lf_path}/masks/{center_idx:04d}.png")
         ).astype(np.uint8)
         depth_image = np.array(Image.open(depth_path), dtype=np.float32) / 1000.0
         object_pose = np.loadtxt(object_pose_path)
