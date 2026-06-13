@@ -24,7 +24,9 @@ def depth_tag(depth_mode: str) -> str:
 
 
 def mesh_path_for(object_name: str, reflectivity: str, depth_mode: str) -> str:
-    return f"{MESH_ROOT}/{object_name}_r{reflectivity}_{depth_tag(depth_mode)}/model.obj"
+    return (
+        f"{MESH_ROOT}/{object_name}_r{reflectivity}_{depth_tag(depth_mode)}/model.obj"
+    )
 
 
 def get_model(device: int):
@@ -83,7 +85,11 @@ def infer_poses(model, dataset):
         gt_poses.append(frame["object_pose"])
 
     # align first estimate to GT so we evaluate tracking only
-    est_to_gt = np.linalg.inv(poses[0]) @ gt_poses[0]
+    try:
+        est_to_gt = np.linalg.inv(poses[0]) @ gt_poses[0]
+    except np.linalg.LinAlgError:
+        print(f"[warn] singular pose[0], skipping sequence")
+        return None
     poses = [p @ est_to_gt for p in poses]
     return poses
 
@@ -92,7 +98,8 @@ def run_sequences(prefix: str, reflectivity: str, depth_mode: str, device: int):
     """Run all sequences for one (prefix, reflectivity, depth_mode) combination."""
     split_dir = f"{DATASET_ROOT}/{prefix}_{reflectivity}"
     sequences = sorted(
-        s for s in os.listdir(split_dir)
+        s
+        for s in os.listdir(split_dir)
         if os.path.isdir(os.path.join(split_dir, s)) and s != "models"
     )
 
@@ -115,12 +122,16 @@ def run_sequences(prefix: str, reflectivity: str, depth_mode: str, device: int):
             continue
 
         seq_path = os.path.join(split_dir, seq_name)
-        print(f"[run]  {prefix}_{reflectivity} / {depth_mode} / {seq_name}  mesh={object_name}")
+        print(
+            f"[run]  {prefix}_{reflectivity} / {depth_mode} / {seq_name}  mesh={object_name}"
+        )
 
         dataset = YCBV_LF_Prod(seq_path, mesh_path, depth_mode=depth_mode)
         set_object(model, dataset.mesh)
 
         poses = infer_poses(model, dataset)
+        if poses is None:
+            continue
         np.save(out_path, np.array(poses, dtype=np.float32))
         print(f"[done] saved {out_path}  ({len(poses)} frames)")
 
@@ -136,7 +147,9 @@ def main():
     parser.add_argument("--gpu", type=int, default=0, help="CUDA device index")
     args = parser.parse_args()
 
-    prefixes = {"cube": ["cube"], "objects": ["objects"], "all": ["cube", "objects"]}[args.mode]
+    prefixes = {"cube": ["cube"], "objects": ["objects"], "all": ["cube", "objects"]}[
+        args.mode
+    ]
 
     for prefix in prefixes:
         for reflectivity in REFLECTIVITIES:

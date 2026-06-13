@@ -122,8 +122,8 @@ class YCBV_LF:
 
     def __getitem__(self, idx):
         lf_path = self.lf_paths[idx]
-        depth_path = self.depth_paths[idx]
-        object_pose_path = self.object_poses_paths[idx]
+        depth_path = self.depth_paths[min(idx, len(self.depth_paths) - 1)]
+        object_pose_path = self.object_poses_paths[min(idx, len(self.object_poses_paths) - 1)]
         frame_id = int(lf_path[-4:])
         rgb_image = np.array(
             Image.open(f"{lf_path}/{self.n_cameras//2:04d}.png")
@@ -190,8 +190,8 @@ class YCBV_LF_Prod:
 
     def __getitem__(self, idx):
         lf_path = self.lf_paths[idx]
-        depth_path = self.depth_paths[idx]
-        object_pose_path = self.object_poses_paths[idx]
+        depth_path = self.depth_paths[min(idx, len(self.depth_paths) - 1)]
+        object_pose_path = self.object_poses_paths[min(idx, len(self.object_poses_paths) - 1)]
         frame_id = int(lf_path[-4:])
         center_idx = self.n_cameras // 2
         rgb_image = np.array(Image.open(f"{lf_path}/{center_idx:04d}.png")).astype(np.uint8)
